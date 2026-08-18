@@ -51,6 +51,7 @@ export const LabViewport: React.FC<LabViewportProps> = ({
   const [activeGizmoMode, setActiveGizmoMode] = useState<KspGizmoMode>('offset');
   const [isSnapActive, setIsSnapActive] = useState<boolean>(true);
   const [selectedComponentName, setSelectedComponentName] = useState<string | null>(null);
+  const [isAssembled, setIsAssembled] = useState<boolean>(false);
 
   // Initialize Engine
   useEffect(() => {
@@ -97,6 +98,17 @@ export const LabViewport: React.FC<LabViewportProps> = ({
     if (engineRef.current) engineRef.current.gizmo.snapEnabled = next;
   };
 
+  const handleToggleAssembly = () => {
+    if (!engineRef.current) return;
+    if (isAssembled) {
+      engineRef.current.packInBox();
+      setIsAssembled(false);
+    } else {
+      engineRef.current.autoAssemble();
+      setIsAssembled(true);
+    }
+  };
+
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       {/* KSP Style Construction Mode Toolbar (Top Left) */}
@@ -139,6 +151,24 @@ export const LabViewport: React.FC<LabViewportProps> = ({
           title="Alternar Snap de 5° e 5mm (Atalho: C)"
         >
           [C] Snap: {isSnapActive ? '5° / 5mm' : 'Livre'}
+        </button>
+      </div>
+
+      {/* Assembly Toggle Button (Top Right) */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          zIndex: 10,
+        }}
+      >
+        <button
+          className={`btn-ksp-action ${isAssembled ? 'primary' : 'success'}`}
+          style={{ padding: '8px 14px', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}
+          onClick={handleToggleAssembly}
+        >
+          {isAssembled ? '📦 Guardar Tudo na Caixa' : '⚙️ Montar Experimento Automaticamente'}
         </button>
       </div>
 

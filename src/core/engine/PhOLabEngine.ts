@@ -152,6 +152,78 @@ export class PhOLabEngine {
     this.targetCamLook.set(...target);
   }
 
+  public autoAssemble() {
+    this.gizmo.attach(null);
+    this.callbacks.onSelectComponent(null);
+
+    // Position components in their assembled laboratory state on the workbench
+    this.stand.baseGroup.position.set(-0.25, 0.0125, 0);
+    this.stand.baseGroup.rotation.set(0, 0, 0);
+
+    this.stand.rodGroup.position.set(-0.14, 0.585, -0.07);
+    this.stand.rodGroup.rotation.set(0, 0, 0); // Vertical in base hole
+
+    this.stand.collarGroup.position.set(-0.14, 0.5, -0.07);
+    this.stand.collarGroup.rotation.set(0, 0, 0);
+
+    this.sandBowl.group.position.set(-0.25, 0.03, 0.04);
+    this.sandBowl.group.rotation.set(0, 0, 0);
+
+    this.ballsTray.group.position.set(-0.18, 0.01, -0.18);
+    this.ballsTray.group.rotation.set(0, 0, 0);
+
+    this.ruler.group.position.set(-0.25, 0.062, 0.04);
+    this.ruler.group.rotation.set(0, 0, 0);
+
+    this.spoon.group.position.set(-0.45, 0.015, -0.12);
+    this.spoon.group.rotation.set(0, 0, 0);
+
+    this.railTrack.railGroup.position.set(0.36, 0.082, -0.28);
+    this.railTrack.railGroup.rotation.set((5.0 * Math.PI) / 180, 0, 0);
+
+    this.railTrack.trackGroup.position.set(0.36, 0.0125, 0.28);
+    this.railTrack.trackGroup.rotation.set(0, 0, 0);
+
+    this.chronometer.group.position.set(0.06, 0.015, 0.22);
+    this.chronometer.group.rotation.set(0, 0, 0);
+  }
+
+  public packInBox() {
+    this.gizmo.attach(null);
+    this.callbacks.onSelectComponent(null);
+
+    // Return components to their packed state inside the Kit Box
+    this.stand.baseGroup.position.set(0.46, 0.025, 0.34);
+    this.stand.baseGroup.rotation.set(0, 0, 0);
+
+    this.stand.rodGroup.position.set(0.60, 0.035, 0.28);
+    this.stand.rodGroup.rotation.set(Math.PI / 2, 0, 0);
+
+    this.stand.collarGroup.position.set(0.55, 0.035, 0.38);
+    this.stand.collarGroup.rotation.set(0, 0, 0);
+
+    this.sandBowl.group.position.set(0.38, 0.035, 0.36);
+    this.sandBowl.group.rotation.set(0, 0, 0);
+
+    this.ballsTray.group.position.set(0.42, 0.035, 0.24);
+    this.ballsTray.group.rotation.set(0, 0, 0);
+
+    this.ruler.group.position.set(0.55, 0.032, 0.20);
+    this.ruler.group.rotation.set(0, 0, 0);
+
+    this.spoon.group.position.set(0.50, 0.032, 0.16);
+    this.spoon.group.rotation.set(0, 0, 0);
+
+    this.railTrack.railGroup.position.set(0.62, 0.035, 0.28);
+    this.railTrack.railGroup.rotation.set(0, 0, 0);
+
+    this.railTrack.trackGroup.position.set(0.36, 0.028, 0.26);
+    this.railTrack.trackGroup.rotation.set(0, 0, 0);
+
+    this.chronometer.group.position.set(0.58, 0.032, 0.40);
+    this.chronometer.group.rotation.set(0, 0, 0);
+  }
+
   public triggerDropBall() {
     if (this.isFalling) return;
     const collarPos = new THREE.Vector3();
