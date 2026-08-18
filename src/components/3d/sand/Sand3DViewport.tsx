@@ -7,19 +7,46 @@ import { BallSpec, PhOLabComponent3DState, SandCraterExperimentState } from '../
 
 export type SandCameraPreset =
   | 'overview'
+  | 'kit_box'
   | 'craters_bowl'
   | 'stand_height'
   | 'inclined_rail'
-  | 'chronometer'
-  | 'kit_box';
+  | 'chronometer';
 
 const PRESET_CONFIGS: Record<SandCameraPreset, { pos: [number, number, number]; target: [number, number, number] }> = {
   overview: { pos: [0, 0.75, 1.2], target: [0, 0.05, 0] },
+  kit_box: { pos: [0.48, 0.45, 0.55], target: [0.48, 0.04, 0.28] },
   craters_bowl: { pos: [-0.25, 0.38, 0.26], target: [-0.25, 0.04, 0.02] },
   stand_height: { pos: [-0.25, 0.75, 0.55], target: [-0.25, 0.5, 0] },
   inclined_rail: { pos: [0.36, 0.52, 0.45], target: [0.36, 0.12, -0.05] },
   chronometer: { pos: [0.06, 0.28, 0.36], target: [0.06, 0.02, 0.22] },
-  kit_box: { pos: [0.48, 0.48, 0.5], target: [0.48, 0.05, 0.25] },
+};
+
+// Initial unpacked positions inside the Kit Box vs Assembled positions on the Workbench
+const BOX_POSITIONS = {
+  standBase: { pos: [0.48, 0.025, 0.32], rot: [0, 0, 0] },
+  standRod: { pos: [0.60, 0.035, 0.28], rot: [Math.PI / 2, 0, 0] }, // Lying flat in box
+  standCollar: { pos: [0.55, 0.035, 0.38], rot: [0, 0, 0] },
+  sandBowl: { pos: [0.38, 0.035, 0.36], rot: [0, 0, 0] },
+  ballsTray: { pos: [0.42, 0.035, 0.24], rot: [0, 0, 0] },
+  ruler: { pos: [0.55, 0.032, 0.20], rot: [0, 0, 0] },
+  spoon: { pos: [0.50, 0.032, 0.16], rot: [0, 0, 0] },
+  inclinedRail: { pos: [0.62, 0.035, 0.28], rot: [0, 0, 0] },
+  brakingTrack: { pos: [0.36, 0.028, 0.26], rot: [0, 0, 0] },
+  chronometer: { pos: [0.58, 0.032, 0.40], rot: [0, 0, 0] },
+};
+
+const ASSEMBLED_POSITIONS = {
+  standBase: { pos: [-0.25, 0.0125, 0], rot: [0, 0, 0] },
+  standRod: { pos: [-0.14, 0.585, -0.07], rot: [0, 0, 0] }, // Vertical in base hole
+  standCollar: { pos: [-0.14, 0.5, -0.07], rot: [0, 0, 0] },
+  sandBowl: { pos: [-0.25, 0.03, 0.04], rot: [0, 0, 0] },
+  ballsTray: { pos: [-0.18, 0.01, -0.18], rot: [0, 0, 0] },
+  ruler: { pos: [-0.25, 0.062, 0.04], rot: [0, 0, 0] },
+  spoon: { pos: [-0.45, 0.015, -0.12], rot: [0, 0, 0] },
+  inclinedRail: { pos: [0.36, 0.082, -0.28], rot: [(5.0 * Math.PI) / 180, 0, 0] },
+  brakingTrack: { pos: [0.36, 0.0125, 0.28], rot: [0, 0, 0] },
+  chronometer: { pos: [0.06, 0.015, 0.22], rot: [0, 0, 0] },
 };
 
 interface Sand3DViewportProps {
@@ -56,6 +83,12 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
   const gimbalRef = useRef<TransformGimbal | null>(null);
   const controlsRef = useRef<SimpleOrbitControls | null>(null);
 
+  // Unboxed / Assembled state tracker
+  const [isAssembled, setIsAssembled] = useState(false);
+
+  // Component Mesh References
+  const componentsRef = useRef<{ [key: string]: THREE.Object3D }>({});
+
   // Physics animation variables
   const isFallingRef = useRef(false);
   const ballPosRef = useRef(new THREE.Vector3(0, 0, 0));
@@ -69,7 +102,6 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
 
   // Sand Deformable Mesh
   const sandGeomRef = useRef<THREE.PlaneGeometry | null>(null);
-  const sandMeshRef = useRef<THREE.Mesh | null>(null);
   const baseSandPositions = useRef<Float32Array | null>(null);
 
   // Chronometer & Clock Textures
@@ -77,10 +109,6 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
   const chronoTexRef = useRef<THREE.CanvasTexture | null>(null);
   const clockCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const clockTexRef = useRef<THREE.CanvasTexture | null>(null);
-
-  // Assembly & Snapping Targets
-  const standRodMeshRef = useRef<THREE.Mesh | null>(null);
-  const collarGroupRef = useRef<THREE.Group | null>(null);
 
   // Update target camera position on preset change
   useEffect(() => {
@@ -91,9 +119,10 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
 
   // Trigger Ball Free-Fall Simulation
   const triggerPhysicsDrop = useCallback(() => {
-    if (!collarGroupRef.current || isFallingRef.current) return;
+    const collar = componentsRef.current['component_stand_collar'];
+    if (!collar || isFallingRef.current) return;
     const collarWorldPos = new THREE.Vector3();
-    collarGroupRef.current.getWorldPosition(collarWorldPos);
+    collar.getWorldPosition(collarWorldPos);
 
     ballPosRef.current.set(collarWorldPos.x - 0.13, collarWorldPos.y, collarWorldPos.z + 0.07);
     ballVelRef.current.set(0, 0, 0);
@@ -126,16 +155,14 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
 
     for (let i = 0; i < posAttr.count; i++) {
       const vx = base[i * 3];
-      const vz = base[i * 3 + 1]; // PlaneGeometry is XY, placed on XZ
+      const vz = base[i * 3 + 1];
       const r = Math.sqrt(vx * vx + vz * vz);
 
       if (r <= craterRadiusM) {
-        // Parabolic cavity
         const frac = r / craterRadiusM;
         const dip = -depthM * (1 - frac * frac);
         array[i * 3 + 2] = dip;
       } else if (r <= rimRadiusM) {
-        // Raised ejecta rim
         const frac = (r - craterRadiusM) / (rimRadiusM - craterRadiusM);
         const bump = rimHeightM * Math.sin(frac * Math.PI);
         array[i * 3 + 2] = bump;
@@ -163,14 +190,23 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     onStirAndLevel();
   }, [onStirAndLevel]);
 
-  // Update Sand Mesh when state craterFormed changes
-  useEffect(() => {
-    if (state.craterFormed && state.lastImpactDiameterMm > 0) {
-      deformSandAtImpact(state.lastImpactDiameterMm);
-    } else if (state.sandStirredAndLeveled) {
-      levelSandMesh();
-    }
-  }, [state.craterFormed, state.lastImpactDiameterMm, state.sandStirredAndLeveled, deformSandAtImpact, levelSandMesh]);
+  // Auto-Assemble / Pack back into Kit Box
+  const toggleAssemblyState = useCallback(() => {
+    const nextState = !isAssembled;
+    setIsAssembled(nextState);
+    const targetMap = nextState ? ASSEMBLED_POSITIONS : BOX_POSITIONS;
+
+    Object.entries(targetMap).forEach(([key, cfg]) => {
+      const compName = `component_${key.replace(/([A-Z])/g, '_$1').toLowerCase()}`;
+      const obj = componentsRef.current[compName];
+      if (obj) {
+        obj.position.set(cfg.pos[0], cfg.pos[1], cfg.pos[2]);
+        obj.rotation.set(cfg.rot[0], cfg.rot[1], cfg.rot[2]);
+      }
+    });
+
+    if (gimbalRef.current) gimbalRef.current.attach(null);
+  }, [isAssembled]);
 
   // Main Three.js Scene Setup & Physics Animation Loop
   useEffect(() => {
@@ -202,10 +238,22 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     // 4. Transform Gimbal for Object Manipulation
     const gimbal = new TransformGimbal(camera, renderer.domElement);
     gimbal.onDragStart = () => {
-      controls.isLocked = true; // Lock camera while moving parts
+      controls.isLocked = true;
     };
     gimbal.onDragEnd = () => {
       controls.isLocked = false;
+      // Check subtle snaps on drag end
+      if (gimbal.targetObject) {
+        const obj = gimbal.targetObject;
+        if (obj.name === 'component_stand_rod') {
+          const baseObj = componentsRef.current['component_stand_base'];
+          if (baseObj && obj.position.distanceTo(baseObj.position) < 0.12) {
+            // Snap rod vertically into base
+            obj.position.set(baseObj.position.x + 0.11, baseObj.position.y + 0.58, baseObj.position.z - 0.07);
+            obj.rotation.set(0, 0, 0);
+          }
+        }
+      }
     };
     scene.add(gimbal.group);
     gimbalRef.current = gimbal;
@@ -239,7 +287,7 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     scene.add(gridHelper);
 
     // -------------------------------------------------------------
-    // 📦 7. EXPERIMENTAL KIT BOX (Contains unpacked apparatus)
+    // 📦 7. EXPERIMENTAL KIT BOX (Opened container on workbench)
     // -------------------------------------------------------------
     const kitBoxGroup = new THREE.Group();
     kitBoxGroup.position.set(0.48, 0.02, 0.28);
@@ -271,83 +319,69 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     kitBoxGroup.add(div1, div2);
     scene.add(kitBoxGroup);
 
-    // -------------------------------------------------------------
-    // 8. SAND BOWL (b) & REALISTIC HIGH-DENSITY DEFORMABLE SAND
-    // -------------------------------------------------------------
-    const bowlGroup = new THREE.Group();
-    bowlGroup.position.set(-0.25, 0.03, 0.04);
-    bowlGroup.name = 'component_sand_bowl';
-
-    const bowlMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.115, 0.095, 0.05, 36),
-      new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.4 })
-    );
-    bowlMesh.castShadow = true;
-    bowlMesh.receiveShadow = true;
-    bowlGroup.add(bowlMesh);
-
-    // 64x64 High Density Circular Deformable Plane for Sand
-    const sandGeom = new THREE.PlaneGeometry(0.21, 0.21, 64, 64);
-    sandGeom.rotateX(-Math.PI / 2);
-    sandGeomRef.current = sandGeom;
-    baseSandPositions.current = new Float32Array(sandGeom.attributes.position.array);
-
-    // Realistic Sand Grain Shader / Material
-    const sandMat = new THREE.MeshStandardMaterial({
-      color: '#c89658',
-      roughness: 0.96,
-      metalness: 0.02,
-      bumpScale: 0.03,
-    });
-    const sandMesh = new THREE.Mesh(sandGeom, sandMat);
-    sandMesh.position.y = 0.024;
-    sandMesh.receiveShadow = true;
-    sandMesh.castShadow = true;
-    bowlGroup.add(sandMesh);
-    sandMeshRef.current = sandMesh;
-
-    scene.add(bowlGroup);
+    // Set initial positions based on isAssembled
+    const initMap = isAssembled ? ASSEMBLED_POSITIONS : BOX_POSITIONS;
 
     // -------------------------------------------------------------
-    // 9. STAND ASSEMBLY (f1 Base, f4 Rod, f2/f3 Height Collar)
+    // 8. STAND BASE (f1)
     // -------------------------------------------------------------
-    const standGroup = new THREE.Group();
-    standGroup.position.set(-0.25, 0, 0);
-    standGroup.name = 'component_stand';
+    const standBaseGroup = new THREE.Group();
+    standBaseGroup.position.set(...(initMap.standBase.pos as [number, number, number]));
+    standBaseGroup.rotation.set(...(initMap.standBase.rot as [number, number, number]));
+    standBaseGroup.name = 'component_stand_base';
 
-    // Base (f1)
-    const standBase = new THREE.Mesh(
+    const standBaseMesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.32, 0.025, 0.26),
       new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.6 })
     );
-    standBase.position.set(0, 0.0125, 0);
-    standBase.castShadow = true;
-    standGroup.add(standBase);
+    standBaseMesh.castShadow = true;
+    standBaseGroup.add(standBaseMesh);
 
-    // Vertical Stainless Steel Rod (f4)
+    // Hole for vertical rod
+    const holeMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.009, 0.009, 0.026, 16),
+      new THREE.MeshStandardMaterial({ color: '#1e293b' })
+    );
+    holeMesh.position.set(0.11, 0, -0.07);
+    standBaseGroup.add(holeMesh);
+
+    scene.add(standBaseGroup);
+    componentsRef.current['component_stand_base'] = standBaseGroup;
+
+    // -------------------------------------------------------------
+    // 9. VERTICAL STEEL ROD (f4) (1.15m)
+    // -------------------------------------------------------------
+    const standRodGroup = new THREE.Group();
+    standRodGroup.position.set(...(initMap.standRod.pos as [number, number, number]));
+    standRodGroup.rotation.set(...(initMap.standRod.rot as [number, number, number]));
+    standRodGroup.name = 'component_stand_rod';
+
     const rodMesh = new THREE.Mesh(
       new THREE.CylinderGeometry(0.008, 0.008, 1.15, 20),
       new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.9, roughness: 0.2 })
     );
-    rodMesh.position.set(0.11, 0.585, -0.07);
     rodMesh.castShadow = true;
-    standGroup.add(rodMesh);
-    standRodMeshRef.current = rodMesh;
+    standRodGroup.add(rodMesh);
 
-    // Millimeter tick markings on rod
     for (let h = 0.1; h <= 1.0; h += 0.1) {
       const ring = new THREE.Mesh(
         new THREE.CylinderGeometry(0.0085, 0.0085, 0.002, 16),
         new THREE.MeshStandardMaterial({ color: h % 0.5 === 0 ? '#ef4444' : '#1e293b' })
       );
-      ring.position.set(0.11, h, -0.07);
-      standGroup.add(ring);
+      ring.position.set(0, h - 0.58, 0);
+      standRodGroup.add(ring);
     }
 
-    // Height Clamping Collar & Release Arm (f2, f3)
+    scene.add(standRodGroup);
+    componentsRef.current['component_stand_rod'] = standRodGroup;
+
+    // -------------------------------------------------------------
+    // 10. HEIGHT COLLAR & RELEASE ARM (f2, f3)
+    // -------------------------------------------------------------
     const collarGroup = new THREE.Group();
-    collarGroup.position.set(0.11, 0.5, -0.07);
-    collarGroupRef.current = collarGroup;
+    collarGroup.position.set(...(initMap.standCollar.pos as [number, number, number]));
+    collarGroup.rotation.set(...(initMap.standCollar.rot as [number, number, number]));
+    collarGroup.name = 'component_stand_collar';
 
     const collarMesh = new THREE.Mesh(
       new THREE.CylinderGeometry(0.016, 0.016, 0.03, 16),
@@ -363,7 +397,7 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     armMesh.position.set(-0.065, 0, 0.07);
     collarGroup.add(armMesh);
 
-    // Mechanical Release Button (Red trigger)
+    // Mechanical Release Trigger Button
     const triggerMesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.014, 0.016, 0.014),
       new THREE.MeshStandardMaterial({ color: '#ef4444', roughness: 0.3 })
@@ -382,14 +416,51 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     collarGroup.add(dropBallMesh);
     dropBallMeshRef.current = dropBallMesh;
 
-    standGroup.add(collarGroup);
-    scene.add(standGroup);
+    scene.add(collarGroup);
+    componentsRef.current['component_stand_collar'] = collarGroup;
 
     // -------------------------------------------------------------
-    // 10. STEEL BALLS TRAY WITH 4 BALLS (#1 to #4)
+    // 11. SAND BOWL (b) & REALISTIC HIGH-DENSITY DEFORMABLE SAND
+    // -------------------------------------------------------------
+    const bowlGroup = new THREE.Group();
+    bowlGroup.position.set(...(initMap.sandBowl.pos as [number, number, number]));
+    bowlGroup.rotation.set(...(initMap.sandBowl.rot as [number, number, number]));
+    bowlGroup.name = 'component_sand_bowl';
+
+    const bowlMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.115, 0.095, 0.05, 36),
+      new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.4 })
+    );
+    bowlMesh.castShadow = true;
+    bowlMesh.receiveShadow = true;
+    bowlGroup.add(bowlMesh);
+
+    const sandGeom = new THREE.PlaneGeometry(0.21, 0.21, 64, 64);
+    sandGeom.rotateX(-Math.PI / 2);
+    sandGeomRef.current = sandGeom;
+    baseSandPositions.current = new Float32Array(sandGeom.attributes.position.array);
+
+    const sandMat = new THREE.MeshStandardMaterial({
+      color: '#c89658',
+      roughness: 0.96,
+      metalness: 0.02,
+      bumpScale: 0.03,
+    });
+    const sandMesh = new THREE.Mesh(sandGeom, sandMat);
+    sandMesh.position.y = 0.024;
+    sandMesh.receiveShadow = true;
+    sandMesh.castShadow = true;
+    bowlGroup.add(sandMesh);
+
+    scene.add(bowlGroup);
+    componentsRef.current['component_sand_bowl'] = bowlGroup;
+
+    // -------------------------------------------------------------
+    // 12. STEEL BALLS TRAY WITH 4 BALLS (#1 to #4)
     // -------------------------------------------------------------
     const trayGroup = new THREE.Group();
-    trayGroup.position.set(-0.18, 0.01, -0.18);
+    trayGroup.position.set(...(initMap.ballsTray.pos as [number, number, number]));
+    trayGroup.rotation.set(...(initMap.ballsTray.rot as [number, number, number]));
     trayGroup.name = 'component_balls_tray';
 
     const trayMesh = new THREE.Mesh(
@@ -413,13 +484,16 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
       bMesh.name = `ball_selector_${b.id}`;
       trayGroup.add(bMesh);
     });
+
     scene.add(trayGroup);
+    componentsRef.current['component_balls_tray'] = trayGroup;
 
     // -------------------------------------------------------------
-    // 11. TRANSPARENT ACRYLIC RULER (o) (Movable with Gimbal)
+    // 13. TRANSPARENT ACRYLIC RULER (o)
     // -------------------------------------------------------------
     const rulerGroup = new THREE.Group();
-    rulerGroup.position.set(-0.25, 0.062, 0.04);
+    rulerGroup.position.set(...(initMap.ruler.pos as [number, number, number]));
+    rulerGroup.rotation.set(...(initMap.ruler.rot as [number, number, number]));
     rulerGroup.name = 'component_ruler';
 
     const rulerMesh = new THREE.Mesh(
@@ -435,7 +509,6 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     rulerMesh.castShadow = true;
     rulerGroup.add(rulerMesh);
 
-    // High-Resolution Millimeter Scale Canvas Texture
     const rulerCanvas = document.createElement('canvas');
     rulerCanvas.width = 1024;
     rulerCanvas.height = 128;
@@ -462,12 +535,14 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     rulerGroup.add(rulerScaleMesh);
 
     scene.add(rulerGroup);
+    componentsRef.current['component_ruler'] = rulerGroup;
 
     // -------------------------------------------------------------
-    // 12. STIRRING SPOON (n) (Movable with Gimbal)
+    // 14. STIRRING SPOON (n)
     // -------------------------------------------------------------
     const spoonGroup = new THREE.Group();
-    spoonGroup.position.set(-0.45, 0.015, -0.12);
+    spoonGroup.position.set(...(initMap.spoon.pos as [number, number, number]));
+    spoonGroup.rotation.set(...(initMap.spoon.rot as [number, number, number]));
     spoonGroup.name = 'component_spoon';
 
     const spoonHandle = new THREE.Mesh(
@@ -484,70 +559,74 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     spoonHead.scale.set(1, 0.3, 1.4);
     spoonHead.position.set(0, 0, 0.08);
     spoonGroup.add(spoonHead);
+
     scene.add(spoonGroup);
+    componentsRef.current['component_spoon'] = spoonGroup;
 
     // -------------------------------------------------------------
-    // 13. PART B: INCLINED RAIL (h) & SAND BRAKING TRACK (j)
+    // 15. PART B: INCLINED RAIL (h) & BRAKING TRACK (j)
     // -------------------------------------------------------------
-    const partBGroup = new THREE.Group();
-    partBGroup.position.set(0.36, 0, 0);
-    partBGroup.name = 'component_inclined_rail';
+    const railGroup = new THREE.Group();
+    railGroup.position.set(...(initMap.inclinedRail.pos as [number, number, number]));
+    railGroup.rotation.set(...(initMap.inclinedRail.rot as [number, number, number]));
+    railGroup.name = 'component_inclined_rail';
 
-    const thetaRad = (5.0 * Math.PI) / 180;
-
-    // 1m Aluminum V-profile Rail
     const railMesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.025, 0.015, 0.95),
       new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.85, roughness: 0.2 })
     );
-    railMesh.position.set(0, 0.082, -0.28);
-    railMesh.rotation.x = thetaRad;
     railMesh.castShadow = true;
-    partBGroup.add(railMesh);
+    railGroup.add(railMesh);
 
-    // Rail Release Trigger (Amber button)
     const railTrigger = new THREE.Mesh(
       new THREE.BoxGeometry(0.02, 0.02, 0.015),
       new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.4 })
     );
-    railTrigger.position.set(0, 0.13, -0.68);
+    railTrigger.position.set(0, 0.05, -0.40);
     railTrigger.name = 'trigger_roll_ball';
-    partBGroup.add(railTrigger);
+    railGroup.add(railTrigger);
 
-    // Rail Rolling Ball
     const railBallMesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.006, 20, 20),
       new THREE.MeshStandardMaterial({ color: '#f8fafc', metalness: 0.95, roughness: 0.1 })
     );
-    railBallMesh.position.set(0, 0.12, -0.65);
+    railBallMesh.position.set(0, 0.04, -0.37);
     railBallMesh.castShadow = true;
-    partBGroup.add(railBallMesh);
+    railGroup.add(railBallMesh);
     railBallMeshRef.current = railBallMesh;
 
-    // Wooden Braking Sand Track (60cm)
+    scene.add(railGroup);
+    componentsRef.current['component_inclined_rail'] = railGroup;
+
+    const trackGroup = new THREE.Group();
+    trackGroup.position.set(...(initMap.brakingTrack.pos as [number, number, number]));
+    trackGroup.rotation.set(...(initMap.brakingTrack.rot as [number, number, number]));
+    trackGroup.name = 'component_braking_track';
+
     const trackMesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.08, 0.025, 0.55),
       new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.6 })
     );
-    trackMesh.position.set(0, 0.0125, 0.28);
     trackMesh.castShadow = true;
-    partBGroup.add(trackMesh);
+    trackGroup.add(trackMesh);
 
     const sandTrackMesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.07, 0.015, 0.53),
       new THREE.MeshStandardMaterial({ color: '#c89658', roughness: 0.95 })
     );
-    sandTrackMesh.position.set(0, 0.02, 0.28);
+    sandTrackMesh.position.set(0, 0.02, 0);
     sandTrackMesh.receiveShadow = true;
-    partBGroup.add(sandTrackMesh);
+    trackGroup.add(sandTrackMesh);
 
-    scene.add(partBGroup);
+    scene.add(trackGroup);
+    componentsRef.current['component_braking_track'] = trackGroup;
 
     // -------------------------------------------------------------
-    // 14. DIGITAL CHRONOMETER (k) WITH 3D CLICKABLE BUTTONS
+    // 16. DIGITAL CHRONOMETER (k) WITH 3D CLICKABLE BUTTONS
     // -------------------------------------------------------------
     const chronoGroup = new THREE.Group();
-    chronoGroup.position.set(0.06, 0.015, 0.22);
+    chronoGroup.position.set(...(initMap.chronometer.pos as [number, number, number]));
+    chronoGroup.rotation.set(...(initMap.chronometer.rot as [number, number, number]));
     chronoGroup.name = 'component_chronometer';
 
     const chronoBody = new THREE.Mesh(
@@ -556,7 +635,6 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     );
     chronoGroup.add(chronoBody);
 
-    // START/STOP Button (Green)
     const btnStart = new THREE.Mesh(
       new THREE.CylinderGeometry(0.006, 0.006, 0.008, 16),
       new THREE.MeshStandardMaterial({ color: '#10b981', roughness: 0.3 })
@@ -565,7 +643,6 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     btnStart.name = 'button_chrono_start';
     chronoGroup.add(btnStart);
 
-    // RESET Button (Red)
     const btnReset = new THREE.Mesh(
       new THREE.CylinderGeometry(0.006, 0.006, 0.008, 16),
       new THREE.MeshStandardMaterial({ color: '#ef4444', roughness: 0.3 })
@@ -574,7 +651,6 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     btnReset.name = 'button_chrono_reset';
     chronoGroup.add(btnReset);
 
-    // LCD Canvas
     const cCanvas = document.createElement('canvas');
     cCanvas.width = 256;
     cCanvas.height = 128;
@@ -591,9 +667,10 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     chronoGroup.add(lcdMesh);
 
     scene.add(chronoGroup);
+    componentsRef.current['component_chronometer'] = chronoGroup;
 
     // -------------------------------------------------------------
-    // 15. DIGITAL EXAM ELAPSED TIME CLOCK ON WORKBENCH
+    // 17. DIGITAL EXAM CLOCK
     // -------------------------------------------------------------
     const clockCanvas = document.createElement('canvas');
     clockCanvas.width = 512;
@@ -616,13 +693,12 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     scene.add(clockMesh);
 
     // -------------------------------------------------------------
-    // 16. RAYCASTING SELECTION & CLICK INTERACTIONS
+    // 18. RAYCASTING SELECTION & CLICK INTERACTIONS
     // -------------------------------------------------------------
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
     const onPointerClick = (e: MouseEvent) => {
-      // Ignore click if user was orbiting or dragging
       if (gimbal.isDragging) return;
 
       const rect = renderer.domElement.getBoundingClientRect();
@@ -635,7 +711,6 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
       if (intersects.length > 0) {
         let hitObj: THREE.Object3D | null = intersects[0].object;
 
-        // Interactive 3D triggers
         if (hitObj.name === 'button_chrono_start') {
           onToggleChronometer();
           return;
@@ -653,7 +728,6 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
           return;
         }
 
-        // Ball selector in tray
         if (hitObj.name && hitObj.name.startsWith('ball_selector_')) {
           const ballId = hitObj.name.replace('ball_selector_', '');
           const ball = ballsList.find((b) => b.id === ballId);
@@ -663,12 +737,11 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
           }
         }
 
-        // Attach Gimbal to selectable components
         while (hitObj && hitObj.parent && hitObj.parent !== scene && !hitObj.name.startsWith('component_')) {
           hitObj = hitObj.parent;
         }
 
-        if (hitObj && hitObj.name.startsWith('component_')) {
+        if (hitObj && hitObj.name.startsWith('component_') && hitObj.name !== 'component_kit_box') {
           gimbal.attach(hitObj);
         } else {
           gimbal.attach(null);
@@ -679,7 +752,7 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
     renderer.domElement.addEventListener('click', onPointerClick);
 
     // -------------------------------------------------------------
-    // 17. 60 FPS PHYSICS ENGINE & ANIMATION LOOP
+    // 19. 60 FPS PHYSICS ENGINE & ANIMATION LOOP
     // -------------------------------------------------------------
     let animationFrameId: number;
     let lastTime = performance.now();
@@ -690,66 +763,60 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
       const dt = Math.min(0.05, (now - lastTime) * 0.001);
       lastTime = now;
 
-      // Smooth camera interpolation
       camera.position.lerp(targetCamPos.current, 0.07);
       controls.target.lerp(targetCamLook.current, 0.07);
       controls.update();
 
-      // Update Gimbal scale
       gimbal.updateScale();
 
-      // Update Height Collar position
-      collarGroup.position.y = THREE.MathUtils.lerp(
-        collarGroup.position.y,
-        0.05 + (state.dropHeightCm / 100) * 0.9,
-        0.1
-      );
+      // If collar is assembled, keep it following height slider
+      if (isAssembled && componentsRef.current['component_stand_collar']) {
+        const collar = componentsRef.current['component_stand_collar'];
+        collar.position.y = THREE.MathUtils.lerp(
+          collar.position.y,
+          0.05 + (state.dropHeightCm / 100) * 0.9,
+          0.1
+        );
+      }
 
-      // --- BALL FREE-FALL DYNAMICS ($g = 9.81 m/s^2$) ---
+      // Ball Free-fall Dynamics
       if (isFallingRef.current && dropBallMeshRef.current) {
-        // v = v0 - g*dt, y = y0 + v*dt
         ballVelRef.current.y -= 9.81 * dt;
         ballPosRef.current.y += ballVelRef.current.y * dt;
 
         dropBallMeshRef.current.position.copy(ballPosRef.current);
 
-        const sandSurfaceY = 0.055; // Sand level in bowl
+        const sandSurfaceY = 0.055;
         if (ballPosRef.current.y <= sandSurfaceY) {
           ballPosRef.current.y = sandSurfaceY;
           isFallingRef.current = false;
-          // Trigger instant crater deformation
           deformSandAtImpact(state.lastImpactDiameterMm || 23.8);
         }
       } else if (!state.craterFormed && dropBallMeshRef.current) {
-        // Armed on collar arm
         dropBallMeshRef.current.position.set(-0.13, 0, 0.07);
       }
 
-      // --- BALL ROLLING DYNAMICS ($a = 5/7 * g * sin(5 deg)$) ---
+      // Ball Rolling Dynamics
       if (isRollingRef.current && railBallMeshRef.current) {
         const sin5 = Math.sin((5.0 * Math.PI) / 180);
-        const aRoll = (5 / 7) * 9.81 * sin5; // ~0.61 m/s^2
+        const aRoll = (5 / 7) * 9.81 * sin5;
 
         if (rollDistanceRef.current < 0.85) {
-          // Accelerating down aluminum rail
           rollVelocityRef.current += aRoll * dt;
           rollDistanceRef.current += rollVelocityRef.current * dt;
 
           const progress = rollDistanceRef.current / 0.85;
-          railBallMeshRef.current.position.z = -0.65 + progress * 0.85;
-          railBallMeshRef.current.position.y = 0.12 - progress * (0.12 - 0.03);
-
-          // Rotate sphere along rotation axis
+          railBallMeshRef.current.position.z = -0.37 + progress * 0.85;
+          railBallMeshRef.current.position.y = 0.04 - progress * (0.04 - 0.015);
           railBallMeshRef.current.rotation.x += (rollVelocityRef.current / 0.006) * dt;
         } else {
-          // Braking on Sand Track (Deceleration by Coulomb friction mu ~ 0.80)
           const aBrake = -0.8 * 9.81;
           rollVelocityRef.current = Math.max(0, rollVelocityRef.current + aBrake * dt);
           rollDistanceRef.current += rollVelocityRef.current * dt;
 
           const sandProgress = (rollDistanceRef.current - 0.85);
-          railBallMeshRef.current.position.z = 0.20 + sandProgress;
-          railBallMeshRef.current.position.y = 0.03;
+          railBallMeshRef.current.position.z = 0.48 + sandProgress;
+          railBallMeshRef.current.position.y = 0.015;
           railBallMeshRef.current.rotation.x += (rollVelocityRef.current / 0.006) * dt;
 
           if (rollVelocityRef.current <= 0) {
@@ -814,10 +881,30 @@ export const Sand3DViewport: React.FC<Sand3DViewportProps> = ({
         container.removeChild(renderer.domElement);
       }
     };
-  }, [ballsList, selectedBall]);
+  }, [ballsList, selectedBall, isAssembled]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {/* Assembly Toggle & Instructions (Top Right Minimalist) */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          display: 'flex',
+          gap: 8,
+          zIndex: 10,
+        }}
+      >
+        <button
+          className={`btn-ksp-action ${isAssembled ? 'primary' : 'success'}`}
+          style={{ padding: '8px 14px', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}
+          onClick={toggleAssemblyState}
+        >
+          {isAssembled ? '📦 Guardar Tudo na Caixa' : '⚙️ Montar Aparato na Mesa'}
+        </button>
+      </div>
+
       {/* Keyboard & Mouse Navigation Hints Overlay */}
       <div
         style={{
