@@ -17,18 +17,20 @@ import {
   Clock
 } from './components/icons/Icons';
 
-import { AppMode, BallSpec, PhOLabPackage, SandCraterExperimentState } from './types/pholab';
+import { AppMode, BallSpec, PhOLabPackage, SandCraterExperimentState } from './domain/types';
 import { IPHO_2025_SAND_CRATERS_PACKAGE } from './experiments/IPhO2025SandCraters';
-import { SandImpactPhysics, OFFICIAL_IPHO_BALLS } from './physics/SandImpactPhysics';
+import { SandImpactSolver } from './domain/physics/SandImpactSolver';
+import { RailRollingSolver } from './domain/physics/RailRollingSolver';
+import { OFFICIAL_IPHO_BALLS } from './physics/SandImpactPhysics';
 import { ExperimentHub } from './modes/hub/ExperimentHub';
 import { CreatorStudio } from './modes/studio/CreatorStudio';
-import { Sand3DViewport, SandCameraPreset } from './components/3d/sand/Sand3DViewport';
+import { LabViewport, LabCameraPreset } from './modes/lab/LabViewport';
 
 export const App: React.FC = () => {
-  // Navigation Mode
+  // Navigation Mode: Hub (Catalog), Studio (Creator), Lab (3D Simulation)
   const [currentMode, setCurrentMode] = useState<AppMode>('hub');
 
-  // Active Experiment Package
+  // Active Experiment Package (.pholab)
   const [activePackage, setActivePackage] = useState<PhOLabPackage>(IPHO_2025_SAND_CRATERS_PACKAGE);
   const [examSeed, setExamSeed] = useState<string>('IPHO-2025-MARS');
 
@@ -36,14 +38,15 @@ export const App: React.FC = () => {
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(true);
 
-  // Physics Engine Instance
-  const physics = useMemo(() => new SandImpactPhysics(examSeed), [examSeed]);
+  // Physics Solvers
+  const impactSolver = useMemo(() => new SandImpactSolver(1.8), []);
+  const rollingSolver = useMemo(() => new RailRollingSolver(), []);
 
   // Camera Preset for 3D Lab
-  const [cameraPreset, setCameraPreset] = useState<SandCameraPreset>('overview');
+  const [cameraPreset, setCameraPreset] = useState<LabCameraPreset>('overview');
 
-  // Sand Crater Experiment State
-  const [selectedBall, setSelectedBall] = useState<BallSpec>(OFFICIAL_IPHO_BALLS[2]); // Ball #3 (9mm, 3.0g) by default
+  // Sand Crater Experiment Runtime State
+  const [selectedBall, setSelectedBall] = useState<BallSpec>(OFFICIAL_IPHO_BALLS[2]);
   const [experimentState, setExperimentState] = useState<SandCraterExperimentState>({
     selectedBallId: OFFICIAL_IPHO_BALLS[2].id,
     dropHeightCm: 50.0,
@@ -58,7 +61,7 @@ export const App: React.FC = () => {
     ballStoppingDistanceCm: 0,
     isChronometerRunning: false,
     chronometerTimeS: 0,
-    gimbalMode: 'translate',
+    gimbalMode: 'offset',
   });
 
   // Elapsed exam timer tick
@@ -84,7 +87,7 @@ export const App: React.FC = () => {
 
   // --- Part A Actions: Crater Impact ---
   const handleDropBall = useCallback(() => {
-    const impact = physics.computeImpact(
+    const impact = impactSolver.computeImpact(
       selectedBall,
       experimentState.dropHeightCm,
       experimentState.sandStirredAndLeveled
@@ -93,11 +96,11 @@ export const App: React.FC = () => {
     setExperimentState((prev) => ({
       ...prev,
       craterFormed: true,
-      sandStirredAndLeveled: false, // Sand becomes compacted until stirred again
+      sandStirredAndLeveled: false,
       lastImpactDiameterMm: impact.craterDiameterMm,
       lastImpactEnergyJ: impact.impactEnergyJ,
     }));
-  }, [physics, selectedBall, experimentState.dropHeightCm, experimentState.sandStirredAndLeveled]);
+  }, [impactSolver, selectedBall, experimentState.dropHeightCm, experimentState.sandStirredAndLeveled]);
 
   const handleStirAndLevel = useCallback(() => {
     setExperimentState((prev) => ({
@@ -110,7 +113,7 @@ export const App: React.FC = () => {
 
   // --- Part B Actions: Inclined Rail & Sand Track ---
   const handleRollBallOnRail = useCallback(() => {
-    const rolling = physics.computeRolling(
+    const rolling = rollingSolver.computeRolling(
       experimentState.railReleaseDistanceCm,
       experimentState.railAngleDeg,
       experimentState.sandStirredAndLeveled
@@ -122,7 +125,7 @@ export const App: React.FC = () => {
       ballTravelTimeS: rolling.travelTimeS,
       ballStoppingDistanceCm: rolling.stoppingDistanceCm,
     }));
-  }, [physics, experimentState.railReleaseDistanceCm, experimentState.railAngleDeg, experimentState.sandStirredAndLeveled]);
+  }, [rollingSolver, experimentState.railReleaseDistanceCm, experimentState.railAngleDeg, experimentState.sandStirredAndLeveled]);
 
   const handleRollComplete = useCallback(() => {
     setExperimentState((prev) => ({
@@ -193,7 +196,6 @@ export const App: React.FC = () => {
 
         {/* Right Actions: Elapsed Exam Timer & Seed */}
         <div className="navbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {/* Exam Elapsed Timer */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -248,7 +250,7 @@ export const App: React.FC = () => {
         {/* MODE 3: LABORATORY (Hands-on 3D Simulation) */}
         {currentMode === 'lab' && (
           <div className="lab-viewport-wrapper">
-            <Sand3DViewport
+            <LabViewport
               cameraPreset={cameraPreset}
               state={experimentState}
               ballsList={OFFICIAL_IPHO_BALLS}
@@ -262,9 +264,8 @@ export const App: React.FC = () => {
               onResetChronometer={handleResetChronometer}
             />
 
-            {/* Minimalist Floating HUD Panel (Camera Presets & Fine Tuning) */}
+            {/* Minimalist Floating Camera Presets HUD */}
             <div className="lab-tactile-hud">
-              {/* Focal Cameras */}
               <div className="hud-pill-group">
                 <div className="hud-pill-title">
                   <Eye size={13} />
@@ -308,97 +309,6 @@ export const App: React.FC = () => {
                     Cronômetro
                   </button>
                 </div>
-              </div>
-
-              {/* Part A: Crater Fine Adjust */}
-              <div className="hud-pill-group">
-                <div className="hud-pill-title">
-                  <CircleDot size={13} />
-                  <span>Parte A: Altura de Queda (h)</span>
-                </div>
-
-                <div className="hud-row-item">
-                  <span className="label">Esfera Equipada:</span>
-                  <span className="value" style={{ color: '#f59e0b' }}>
-                    {selectedBall.name} ({selectedBall.massG}g)
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {OFFICIAL_IPHO_BALLS.map((b) => (
-                    <button
-                      key={b.id}
-                      className={`btn-ksp-action ${selectedBall.id === b.id ? 'primary' : ''}`}
-                      style={{ flex: 1, padding: '4px 0', fontSize: 11 }}
-                      onClick={() => setSelectedBall(b)}
-                    >
-                      #{b.id.split('-')[1]}
-                    </button>
-                  ))}
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div className="hud-row-item">
-                    <span className="label">Altura do Colar (h):</span>
-                    <span className="value">{experimentState.dropHeightCm} cm</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="100"
-                    step="5"
-                    value={experimentState.dropHeightCm}
-                    onChange={(e) =>
-                      setExperimentState({ ...experimentState, dropHeightCm: Number(e.target.value) })
-                    }
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                  <button className="btn-ksp-action primary" style={{ flex: 1 }} onClick={handleDropBall}>
-                    Soltar Esfera
-                  </button>
-                  <button
-                    className={`btn-ksp-action ${experimentState.sandStirredAndLeveled ? 'success' : ''}`}
-                    onClick={handleStirAndLevel}
-                    title="Misturar areia com a colher e nivelar"
-                  >
-                    Nivelar Areia
-                  </button>
-                </div>
-              </div>
-
-              {/* Part B: Inclined Rail */}
-              <div className="hud-pill-group">
-                <div className="hud-pill-title">
-                  <Activity size={13} />
-                  <span>Parte B: Trilho Inclinado 5°</span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div className="hud-row-item">
-                    <span className="label">Distância de Lançamento (l):</span>
-                    <span className="value">{experimentState.railReleaseDistanceCm} cm</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="100"
-                    step="10"
-                    value={experimentState.railReleaseDistanceCm}
-                    onChange={(e) =>
-                      setExperimentState({ ...experimentState, railReleaseDistanceCm: Number(e.target.value) })
-                    }
-                  />
-                </div>
-
-                <button
-                  className="btn-ksp-action primary"
-                  disabled={experimentState.ballRolling}
-                  onClick={handleRollBallOnRail}
-                >
-                  {experimentState.ballRolling ? 'Esfera Rolando...' : 'Soltar no Trilho'}
-                </button>
               </div>
             </div>
           </div>
