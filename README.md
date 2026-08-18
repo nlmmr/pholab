@@ -27,7 +27,7 @@ O **PhOLab** é uma plataforma aberta que simula com rigor físico o ambiente de
 
 ```bash
 # 1. Clonar o repositório
-git clone https://github.com/SEU_USUARIO/pholab.git
+git clone https://github.com/nlmmr/pholab.git
 
 # 2. Entrar na pasta
 cd pholab
