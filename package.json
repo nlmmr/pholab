@@ -1,5 +1,6 @@
 {
   "name": "pholab",
+  "author": "nlmmr",
   "private": true,
   "version": "0.1.0",
   "type": "module",
