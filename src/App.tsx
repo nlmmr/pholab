@@ -13,7 +13,8 @@ import {
   Eye,
   Settings,
   Award,
-  Hash
+  Hash,
+  Clock
 } from './components/icons/Icons';
 
 import { AppMode, BallSpec, PhOLabPackage, SandCraterExperimentState } from './types/pholab';
@@ -31,9 +32,9 @@ export const App: React.FC = () => {
   const [activePackage, setActivePackage] = useState<PhOLabPackage>(IPHO_2025_SAND_CRATERS_PACKAGE);
   const [examSeed, setExamSeed] = useState<string>('IPHO-2025-MARS');
 
-  // Exam Clock
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(activePackage.durationMinutes * 60);
-  const [isClockRunning, setIsClockRunning] = useState<boolean>(true);
+  // Exam Elapsed Timer (Tempo de Prova Decorrido)
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [isTimerRunning, setIsTimerRunning] = useState<boolean>(true);
 
   // Physics Engine Instance
   const physics = useMemo(() => new SandImpactPhysics(examSeed), [examSeed]);
@@ -57,18 +58,19 @@ export const App: React.FC = () => {
     ballStoppingDistanceCm: 0,
     isChronometerRunning: false,
     chronometerTimeS: 0,
+    gimbalMode: 'translate',
   });
 
-  // Clock tick timer
+  // Elapsed exam timer tick
   useEffect(() => {
-    if (!isClockRunning) return;
+    if (!isTimerRunning) return;
     const interval = setInterval(() => {
-      setSecondsRemaining((prev) => Math.max(0, prev - 1));
+      setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, [isClockRunning]);
+  }, [isTimerRunning]);
 
-  // Stopwatch timer
+  // Stopwatch timer tick
   useEffect(() => {
     if (!experimentState.isChronometerRunning) return;
     const timer = setInterval(() => {
@@ -144,39 +146,13 @@ export const App: React.FC = () => {
     }));
   }, []);
 
-  // Task document text lines for physical paper on table
-  const taskLines = useMemo(() => [
-    activePackage.title.toUpperCase(),
-    '',
-    `OLYMPIAD: ${activePackage.olympiad}`,
-    '',
-    'PART A: CRATER FORMATION (Q2-4)',
-    '  Drop ball #3 (d=9mm, m=3.0g) from h=50cm.',
-    '  Measure diameter D with the ruler. Repeat 5 times.',
-    '  Stir and level the sand after each impact!',
-    '',
-    'PART B: ROLLING ON RAIL & SAND (Q2-7)',
-    '  Rail at theta = 5 deg. Measure travel time t50 for l=50cm.',
-    '  Measure stopping distance L in sand track.',
-  ], [activePackage]);
-
-  const schemeLines = useMemo(() => [
-    'MARKING SCHEME — IPhO 2025',
-    '',
-    'QUESTION A.1 (0.6 pt):',
-    '  D = (23.8 +- 1.2) mm',
-    '  2 measures of D between 22-26mm (0.2pt)',
-    '  3 more measures (0.2pt)',
-    '',
-    'QUESTION B.2 (0.7 pt):',
-    '  t50 = (1.33 +- 0.04) s',
-    '',
-    'QUESTION B.6 (0.8 pt):',
-    '  L50 = (6.4 +- 0.5) cm',
-    '',
-    'QUESTION B.8 (0.2 pt):',
-    '  mu_eff = 0.80 +- 0.15',
-  ], []);
+  // Format Elapsed Time: HH:MM:SS
+  const formattedElapsedTime = useMemo(() => {
+    const h = Math.floor(elapsedSeconds / 3600);
+    const m = Math.floor((elapsedSeconds % 3600) / 60);
+    const s = elapsedSeconds % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }, [elapsedSeconds]);
 
   return (
     <div className="app-container">
@@ -215,8 +191,26 @@ export const App: React.FC = () => {
           </button>
         </div>
 
-        {/* Right Actions */}
-        <div className="navbar-actions">
+        {/* Right Actions: Elapsed Exam Timer & Seed */}
+        <div className="navbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {/* Exam Elapsed Timer */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'rgba(15, 23, 42, 0.45)',
+            padding: '4px 10px',
+            borderRadius: 6,
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            fontSize: 12,
+            fontFamily: 'monospace',
+            color: '#fde047'
+          }}>
+            <Clock size={14} color="#f59e0b" />
+            <span>DECORRIDO: {formattedElapsedTime}</span>
+            <span style={{ color: '#94a3b8' }}>/ {activePackage.durationMinutes} min</span>
+          </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#93c5fd', fontFamily: 'monospace' }}>
             <Hash size={12} color="#f59e0b" />
             <span>SEED: {examSeed}</span>
@@ -251,7 +245,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* MODE 3: LABORATORY (3D Simulation) */}
+        {/* MODE 3: LABORATORY (Hands-on 3D Simulation) */}
         {currentMode === 'lab' && (
           <div className="lab-viewport-wrapper">
             <Sand3DViewport
@@ -259,17 +253,18 @@ export const App: React.FC = () => {
               state={experimentState}
               ballsList={OFFICIAL_IPHO_BALLS}
               selectedBall={selectedBall}
+              elapsedSeconds={elapsedSeconds}
               onSelectBall={setSelectedBall}
               onDropBall={handleDropBall}
               onStirAndLevel={handleStirAndLevel}
               onRollRailBall={handleRollComplete}
-              taskLines={taskLines}
-              schemeLines={schemeLines}
+              onToggleChronometer={handleToggleChronometer}
+              onResetChronometer={handleResetChronometer}
             />
 
-            {/* KSP Industrial Floating Control Panel (HUD) */}
+            {/* Minimalist Floating HUD Panel (Camera Presets & Fine Tuning) */}
             <div className="lab-tactile-hud">
-              {/* Focal Cameras Pill */}
+              {/* Focal Cameras */}
               <div className="hud-pill-group">
                 <div className="hud-pill-title">
                   <Eye size={13} />
@@ -283,22 +278,28 @@ export const App: React.FC = () => {
                     Bancada Geral
                   </button>
                   <button
+                    className={`btn-ksp-action ${cameraPreset === 'kit_box' ? 'primary' : ''}`}
+                    onClick={() => setCameraPreset('kit_box')}
+                  >
+                    Caixa do Kit
+                  </button>
+                  <button
                     className={`btn-ksp-action ${cameraPreset === 'craters_bowl' ? 'primary' : ''}`}
                     onClick={() => setCameraPreset('craters_bowl')}
                   >
-                    Tigela / Crateras
+                    Tigela / Areia
                   </button>
                   <button
                     className={`btn-ksp-action ${cameraPreset === 'stand_height' ? 'primary' : ''}`}
                     onClick={() => setCameraPreset('stand_height')}
                   >
-                    Suporte de Queda
+                    Suporte Vertical
                   </button>
                   <button
                     className={`btn-ksp-action ${cameraPreset === 'inclined_rail' ? 'primary' : ''}`}
                     onClick={() => setCameraPreset('inclined_rail')}
                   >
-                    Trilho 5° & Areia
+                    Trilho 5° & Pista
                   </button>
                   <button
                     className={`btn-ksp-action ${cameraPreset === 'chronometer' ? 'primary' : ''}`}
@@ -306,24 +307,18 @@ export const App: React.FC = () => {
                   >
                     Cronômetro
                   </button>
-                  <button
-                    className={`btn-ksp-action ${cameraPreset === 'task_sheet' ? 'primary' : ''}`}
-                    onClick={() => setCameraPreset('task_sheet')}
-                  >
-                    Caderno Prova
-                  </button>
                 </div>
               </div>
 
-              {/* Part A Controls: Crater Drop */}
+              {/* Part A: Crater Fine Adjust */}
               <div className="hud-pill-group">
                 <div className="hud-pill-title">
                   <CircleDot size={13} />
-                  <span>Parte A: Impacto de Crateras</span>
+                  <span>Parte A: Altura de Queda (h)</span>
                 </div>
 
                 <div className="hud-row-item">
-                  <span className="label">Esfera Ativa:</span>
+                  <span className="label">Esfera Equipada:</span>
                   <span className="value" style={{ color: '#f59e0b' }}>
                     {selectedBall.name} ({selectedBall.massG}g)
                   </span>
@@ -344,7 +339,7 @@ export const App: React.FC = () => {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div className="hud-row-item">
-                    <span className="label">Altura de Queda (h):</span>
+                    <span className="label">Altura do Colar (h):</span>
                     <span className="value">{experimentState.dropHeightCm} cm</span>
                   </div>
                   <input
@@ -366,29 +361,14 @@ export const App: React.FC = () => {
                   <button
                     className={`btn-ksp-action ${experimentState.sandStirredAndLeveled ? 'success' : ''}`}
                     onClick={handleStirAndLevel}
-                    title="Misturar areia com colher e nivelar com régua"
+                    title="Misturar areia com a colher e nivelar"
                   >
                     Nivelar Areia
                   </button>
                 </div>
-
-                {experimentState.craterFormed && (
-                  <div style={{ background: 'rgba(0,0,0,0.4)', padding: '6px 8px', borderRadius: 4, marginTop: 4 }}>
-                    <div className="hud-row-item">
-                      <span className="label">Diâmetro Medido (D):</span>
-                      <span className="value" style={{ color: '#10b981' }}>
-                        {experimentState.lastImpactDiameterMm.toFixed(1)} mm
-                      </span>
-                    </div>
-                    <div className="hud-row-item">
-                      <span className="label">Energia de Impacto (E):</span>
-                      <span className="value">{experimentState.lastImpactEnergyJ.toExponential(2)} J</span>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {/* Part B Controls: Inclined Rail & Sand */}
+              {/* Part B: Inclined Rail */}
               <div className="hud-pill-group">
                 <div className="hud-pill-title">
                   <Activity size={13} />
@@ -417,23 +397,8 @@ export const App: React.FC = () => {
                   disabled={experimentState.ballRolling}
                   onClick={handleRollBallOnRail}
                 >
-                  {experimentState.ballRolling ? 'Esfera Rolando...' : 'Soltar no Trilho (l)'}
+                  {experimentState.ballRolling ? 'Esfera Rolando...' : 'Soltar no Trilho'}
                 </button>
-
-                {experimentState.ballStoppingDistanceCm > 0 && (
-                  <div style={{ background: 'rgba(0,0,0,0.4)', padding: '6px 8px', borderRadius: 4, marginTop: 4 }}>
-                    <div className="hud-row-item">
-                      <span className="label">Tempo Teórico (t):</span>
-                      <span className="value">{experimentState.ballTravelTimeS.toFixed(2)} s</span>
-                    </div>
-                    <div className="hud-row-item">
-                      <span className="label">Distância Parada (L):</span>
-                      <span className="value" style={{ color: '#10b981' }}>
-                        {experimentState.ballStoppingDistanceCm.toFixed(1)} cm
-                      </span>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>

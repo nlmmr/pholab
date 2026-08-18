@@ -53,14 +53,36 @@ export const ExperimentHub: React.FC<ExperimentHubProps> = ({
       const reader = new FileReader();
       reader.onload = (ev) => {
         try {
-          const parsed = JSON.parse(ev.target?.result as string);
-          if (parsed.formatVersion && parsed.id) {
-            onImportPackage(parsed);
+          const content = ev.target?.result as string;
+          const parsed = JSON.parse(content);
+          if (parsed && (parsed.id || parsed.title)) {
+            // Fill any fallback metadata if missing
+            const validPackage: PhOLabPackage = {
+              formatVersion: parsed.formatVersion || '1.0.0',
+              id: parsed.id || 'imported-experiment',
+              title: parsed.title || 'Experimento Importado',
+              olympiad: parsed.olympiad || 'Olimpíada de Física',
+              year: parsed.year || new Date().getFullYear(),
+              country: parsed.country || 'Internacional',
+              durationMinutes: parsed.durationMinutes || 180,
+              difficulty: parsed.difficulty || 'Avançado',
+              physicsDomain: parsed.physicsDomain || 'granular_mechanics_and_craters',
+              summary: parsed.summary || 'Pacote de experimento importado com sucesso.',
+              author: parsed.author || 'Autor da Comunidade',
+              createdAt: parsed.createdAt || new Date().toISOString(),
+              components: parsed.components || currentPackage.components,
+              nominalParameters: parsed.nominalParameters || currentPackage.nominalParameters,
+              hiddenTruths: parsed.hiddenTruths || currentPackage.hiddenTruths,
+              stochasticNoise: parsed.stochasticNoise || currentPackage.stochasticNoise,
+              taskDocument: parsed.taskDocument || currentPackage.taskDocument,
+            };
+            onImportPackage(validPackage);
           } else {
-            alert('Formato de arquivo .pholab inválido.');
+            alert('O arquivo selecionado não contém um formato de experimento .pholab válido.');
           }
-        } catch {
-          alert('Erro ao carregar o arquivo .pholab.');
+        } catch (err) {
+          console.error('Erro ao importar pacote:', err);
+          alert('Erro ao processar o arquivo .pholab. Verifique se o JSON está bem formatado.');
         }
       };
       reader.readAsText(file);
