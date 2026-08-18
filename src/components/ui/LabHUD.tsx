@@ -4,17 +4,15 @@ import {
   Eye,
   Package,
   Layers,
-  Crosshair,
-  Tv,
+  CircleDot,
   Power,
   RotateCcw,
   Download,
   Upload,
   BookOpen,
-  HelpCircle,
   Hash,
   Sparkles
-} from 'lucide-react';
+} from '../icons/Icons';
 import { CameraPreset } from '../3d/LabScene';
 import { LaserConfig } from '../../physics/types';
 
@@ -98,7 +96,7 @@ export const LabHUD: React.FC<LabHUDProps> = ({
           onClick={() => onSelectCameraPreset('micrometer')}
           title="Zoom de Alta Resolução no Micrômetro Transversal"
         >
-          <Crosshair size={14} />
+          <CircleDot size={14} />
           <span>Micrômetro</span>
         </button>
         <button
@@ -106,7 +104,7 @@ export const LabHUD: React.FC<LabHUDProps> = ({
           onClick={() => onSelectCameraPreset('screen')}
           title="Zoom no Anteparo Milimetrado e Franjas"
         >
-          <Tv size={14} />
+          <Layers size={14} />
           <span>Anteparo</span>
         </button>
       </div>

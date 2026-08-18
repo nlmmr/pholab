@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Activity, RotateCcw, Power } from 'lucide-react';
+import { Activity, Zap, Play, Power } from '../icons/Icons';
 import { OpticalTrainResult } from '../../physics/OpticalBenchSystem';
 
 interface DigitalPowerMeterHUDProps {

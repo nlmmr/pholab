@@ -1,69 +1,65 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { Atom, BookOpen, Hash } from 'lucide-react';
-
-import { LabScene, CameraPreset } from './components/3d/LabScene';
-import { LabHUD } from './components/ui/LabHUD';
-import { TaskDrawer } from './components/ui/TaskDrawer';
-
 import {
-  CarrierState,
-  LaserConfig,
-  OpticalElementType,
-  SlitParameters,
-  PolarizerParameters
-} from './physics/types';
-import { OpticalBenchSystem } from './physics/OpticalBenchSystem';
-import { createIPhOPilotChallenge } from './experiments/IPhOPilotChallenge';
+  Compass,
+  Layers,
+  Wrench,
+  Play,
+  RotateCcw,
+  BookOpen,
+  Timer,
+  Ruler,
+  CircleDot,
+  Activity,
+  Eye,
+  Settings,
+  Award,
+  Hash
+} from './components/icons/Icons';
 
-const INITIAL_SEED = 'IPHO-7X9';
-
-const DEFAULT_LASER: LaserConfig = {
-  id: 'diode-laser-green',
-  name: 'Diode Laser 532nm',
-  wavelengthNm: 532.0,
-  nominalPowerMw: 5.0,
-  beamWaistMm: 0.5,
-  divergenceMrad: 1.2,
-  rinNoisePercent: 1.5,
-  wavelengthJitterNm: 0.2
-};
+import { AppMode, BallSpec, PhOLabPackage, SandCraterExperimentState } from './types/pholab';
+import { IPHO_2025_SAND_CRATERS_PACKAGE } from './experiments/IPhO2025SandCraters';
+import { SandImpactPhysics, OFFICIAL_IPHO_BALLS } from './physics/SandImpactPhysics';
+import { ExperimentHub } from './modes/hub/ExperimentHub';
+import { CreatorStudio } from './modes/studio/CreatorStudio';
+import { Sand3DViewport, SandCameraPreset } from './components/3d/sand/Sand3DViewport';
 
 export const App: React.FC = () => {
-  const [examSeed, setExamSeed] = useState<string>(INITIAL_SEED);
-  const [cameraPreset, setCameraPreset] = useState<CameraPreset>('overview');
+  // Navigation Mode
+  const [currentMode, setCurrentMode] = useState<AppMode>('hub');
 
-  const challenge = useMemo(() => createIPhOPilotChallenge(examSeed), [examSeed]);
+  // Active Experiment Package
+  const [activePackage, setActivePackage] = useState<PhOLabPackage>(IPHO_2025_SAND_CRATERS_PACKAGE);
+  const [examSeed, setExamSeed] = useState<string>('IPHO-2025-MARS');
 
-  // Clock
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(challenge.examDurationMinutes * 60);
+  // Exam Clock
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(activePackage.durationMinutes * 60);
   const [isClockRunning, setIsClockRunning] = useState<boolean>(true);
 
-  // Kit box
-  const [isBoxOpen, setIsBoxOpen] = useState<boolean>(false);
-  const [isBoxOnFloor, setIsBoxOnFloor] = useState<boolean>(false);
-  const [unpackedElements, setUnpackedElements] = useState<Set<string>>(new Set());
+  // Physics Engine Instance
+  const physics = useMemo(() => new SandImpactPhysics(examSeed), [examSeed]);
 
-  // Optical state
-  const [laser, setLaser] = useState<LaserConfig>(DEFAULT_LASER);
-  const [isLaserOn, setIsLaserOn] = useState<boolean>(false);
-  const [carriers, setCarriers] = useState<CarrierState[]>([]);
-  const [selectedCarrierId, setSelectedCarrierId] = useState<string | null>(null);
+  // Camera Preset for 3D Lab
+  const [cameraPreset, setCameraPreset] = useState<SandCameraPreset>('overview');
 
-  // Micrometer & measurement
-  const [transverseMicrometerMm, setTransverseMicrometerMm] = useState<number>(0.0);
-  const [tareOffsetMw, setTareOffsetMw] = useState<number>(0.0);
+  // Sand Crater Experiment State
+  const [selectedBall, setSelectedBall] = useState<BallSpec>(OFFICIAL_IPHO_BALLS[2]); // Ball #3 (9mm, 3.0g) by default
+  const [experimentState, setExperimentState] = useState<SandCraterExperimentState>({
+    selectedBallId: OFFICIAL_IPHO_BALLS[2].id,
+    dropHeightCm: 50.0,
+    sandStirredAndLeveled: true,
+    craterFormed: false,
+    lastImpactDiameterMm: 0,
+    lastImpactEnergyJ: 0,
+    railAngleDeg: 5.0,
+    railReleaseDistanceCm: 50.0,
+    ballRolling: false,
+    ballTravelTimeS: 0,
+    ballStoppingDistanceCm: 0,
+    isChronometerRunning: false,
+    chronometerTimeS: 0,
+  });
 
-  // Physical 3D meter state
-  const [isMeterOn, setIsMeterOn] = useState<boolean>(true);
-  const [meterUnitMode, setMeterUnitMode] = useState<'uW' | 'mW' | 'Lux'>('uW');
-
-  // Task drawer
-  const [isTaskDrawerOpen, setIsTaskDrawerOpen] = useState<boolean>(false);
-
-  const benchSystem = useMemo(() => new OpticalBenchSystem(examSeed), [examSeed]);
-
-  // Clock tick
+  // Clock tick timer
   useEffect(() => {
     if (!isClockRunning) return;
     const interval = setInterval(() => {
@@ -72,257 +68,377 @@ export const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [isClockRunning]);
 
-  // Hidden wavelength from seed
+  // Stopwatch timer
   useEffect(() => {
-    if (challenge.hiddenTruth.exactWavelengthNm) {
-      setLaser((prev) => ({ ...prev, wavelengthNm: challenge.hiddenTruth.exactWavelengthNm! }));
-    }
-  }, [challenge]);
+    if (!experimentState.isChronometerRunning) return;
+    const timer = setInterval(() => {
+      setExperimentState((prev) => ({
+        ...prev,
+        chronometerTimeS: prev.chronometerTimeS + 0.01,
+      }));
+    }, 10);
+    return () => clearInterval(timer);
+  }, [experimentState.isChronometerRunning]);
 
-  // Physics evaluation
-  const trainResult = useMemo(() => {
-    return benchSystem.evaluate(laser, isLaserOn, carriers, transverseMicrometerMm, tareOffsetMw);
-  }, [benchSystem, laser, isLaserOn, carriers, transverseMicrometerMm, tareOffsetMw]);
-
-  // Unpack element from kit
-  const handleUnpackElement = useCallback(
-    (type: OpticalElementType, id: string) => {
-      setUnpackedElements((prev) => new Set(prev).add(type));
-
-      let defaultPosMm = 500;
-      let initialParams: SlitParameters | PolarizerParameters | undefined;
-
-      if (type === 'laser_source') defaultPosMm = 50;
-      else if (type === 'single_slit') { defaultPosMm = 250; initialParams = { slitWidthUm: 80 }; }
-      else if (type === 'double_slit') { defaultPosMm = 250; initialParams = { slitWidthUm: 50, slitSeparationUm: 250 }; }
-      else if (type === 'diffraction_grating') {
-        defaultPosMm = 300;
-        initialParams = { slitWidthUm: 40, linesPerMm: Math.round(challenge.hiddenTruth.gratingLinesPerMm || 600) };
-      } else if (type === 'polarizer') { defaultPosMm = 180; initialParams = { angleDegrees: 0, extinctionRatio: 1.5e-4 }; }
-      else if (type === 'projection_screen') defaultPosMm = 850;
-      else if (type === 'photodetector_stage') defaultPosMm = 750;
-
-      const newCarrier: CarrierState = {
-        id: `carrier-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        elementId: id,
-        type,
-        positionMm: defaultPosMm,
-        isLocked: false,
-        screwTightness: 1.0,
-        heightMm: 100,
-        tiltXDeg: 0,
-        tiltYDeg: 0,
-        rotationDegrees: 0,
-        customParams: initialParams
-      };
-
-      setCarriers((prev) => [...prev, newCarrier]);
-      setSelectedCarrierId(newCarrier.id);
-    },
-    [challenge]
-  );
-
-  const handleCarrierPositionChange = useCallback((id: string, newPosMm: number) => {
-    setCarriers((prev) => prev.map((c) => c.id === id ? { ...c, positionMm: newPosMm } : c));
-  }, []);
-
-  const handleCarrierToggleLock = useCallback((id: string) => {
-    setCarriers((prev) => prev.map((c) => c.id === id ? { ...c, isLocked: !c.isLocked } : c));
-  }, []);
-
-  const handlePolarizerAngleChange = useCallback((id: string, newAngle: number) => {
-    setCarriers((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? { ...c, customParams: { ...(c.customParams as PolarizerParameters), angleDegrees: newAngle } }
-          : c
-      )
+  // --- Part A Actions: Crater Impact ---
+  const handleDropBall = useCallback(() => {
+    const impact = physics.computeImpact(
+      selectedBall,
+      experimentState.dropHeightCm,
+      experimentState.sandStirredAndLeveled
     );
+
+    setExperimentState((prev) => ({
+      ...prev,
+      craterFormed: true,
+      sandStirredAndLeveled: false, // Sand becomes compacted until stirred again
+      lastImpactDiameterMm: impact.craterDiameterMm,
+      lastImpactEnergyJ: impact.impactEnergyJ,
+    }));
+  }, [physics, selectedBall, experimentState.dropHeightCm, experimentState.sandStirredAndLeveled]);
+
+  const handleStirAndLevel = useCallback(() => {
+    setExperimentState((prev) => ({
+      ...prev,
+      sandStirredAndLeveled: true,
+      craterFormed: false,
+      lastImpactDiameterMm: 0,
+    }));
   }, []);
 
-  const handleTare = useCallback(() => {
-    setTareOffsetMw(trainResult.measuredPowerWithNoiseMw);
-  }, [trainResult.measuredPowerWithNoiseMw]);
-
-  const handleResetRailPositions = useCallback(() => {
-    setCarriers((prev) =>
-      prev.map((c) => {
-        let pos = 500;
-        if (c.type === 'laser_source') pos = 50;
-        else if (c.type === 'polarizer') pos = 180;
-        else if (
-          c.type === 'single_slit' ||
-          c.type === 'double_slit' ||
-          c.type === 'diffraction_grating'
-        )
-          pos = 300;
-        else if (c.type === 'photodetector_stage') pos = 750;
-        else if (c.type === 'projection_screen') pos = 850;
-        return { ...c, positionMm: pos, isLocked: false };
-      })
+  // --- Part B Actions: Inclined Rail & Sand Track ---
+  const handleRollBallOnRail = useCallback(() => {
+    const rolling = physics.computeRolling(
+      experimentState.railReleaseDistanceCm,
+      experimentState.railAngleDeg,
+      experimentState.sandStirredAndLeveled
     );
+
+    setExperimentState((prev) => ({
+      ...prev,
+      ballRolling: true,
+      ballTravelTimeS: rolling.travelTimeS,
+      ballStoppingDistanceCm: rolling.stoppingDistanceCm,
+    }));
+  }, [physics, experimentState.railReleaseDistanceCm, experimentState.railAngleDeg, experimentState.sandStirredAndLeveled]);
+
+  const handleRollComplete = useCallback(() => {
+    setExperimentState((prev) => ({
+      ...prev,
+      ballRolling: false,
+    }));
   }, []);
 
-  const handleChangeSeed = useCallback((newSeed: string) => {
-    setExamSeed(newSeed);
-    setCarriers([]);
-    setUnpackedElements(new Set());
-    setIsLaserOn(false);
-    setIsBoxOpen(true);
-    setTareOffsetMw(0);
-    setTransverseMicrometerMm(0);
+  const handleToggleChronometer = useCallback(() => {
+    setExperimentState((prev) => ({
+      ...prev,
+      isChronometerRunning: !prev.isChronometerRunning,
+    }));
   }, []);
 
-  const handleExportState = useCallback(() => {
-    const stateObj = {
-      examSeed,
-      secondsRemaining,
-      isBoxOpen,
-      isBoxOnFloor,
-      unpackedElements: Array.from(unpackedElements),
-      carriers,
-      laser,
-      isLaserOn,
-      transverseMicrometerMm,
-      tareOffsetMw,
-      savedAt: new Date().toISOString()
-    };
-    const jsonStr = JSON.stringify(stateObj, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pholab-session-${examSeed}.phostate`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [
-    examSeed,
-    secondsRemaining,
-    isBoxOpen,
-    isBoxOnFloor,
-    unpackedElements,
-    carriers,
-    laser,
-    isLaserOn,
-    transverseMicrometerMm,
-    tareOffsetMw
-  ]);
-
-  const handleImportState = useCallback((jsonData: string) => {
-    try {
-      const stateObj = JSON.parse(jsonData);
-      if (stateObj.examSeed) setExamSeed(stateObj.examSeed);
-      if (stateObj.secondsRemaining) setSecondsRemaining(stateObj.secondsRemaining);
-      if (stateObj.isBoxOpen !== undefined) setIsBoxOpen(stateObj.isBoxOpen);
-      if (stateObj.isBoxOnFloor !== undefined) setIsBoxOnFloor(stateObj.isBoxOnFloor);
-      if (stateObj.unpackedElements) setUnpackedElements(new Set(stateObj.unpackedElements));
-      if (stateObj.carriers) setCarriers(stateObj.carriers);
-      if (stateObj.laser) setLaser(stateObj.laser);
-      if (stateObj.isLaserOn !== undefined) setIsLaserOn(stateObj.isLaserOn);
-      if (stateObj.transverseMicrometerMm !== undefined)
-        setTransverseMicrometerMm(stateObj.transverseMicrometerMm);
-      if (stateObj.tareOffsetMw !== undefined) setTareOffsetMw(stateObj.tareOffsetMw);
-    } catch (err) {
-      alert('Formato de arquivo .phostate inválido!');
-    }
+  const handleResetChronometer = useCallback(() => {
+    setExperimentState((prev) => ({
+      ...prev,
+      isChronometerRunning: false,
+      chronometerTimeS: 0,
+    }));
   }, []);
+
+  // Task document text lines for physical paper on table
+  const taskLines = useMemo(() => [
+    activePackage.title.toUpperCase(),
+    '',
+    `OLYMPIAD: ${activePackage.olympiad}`,
+    '',
+    'PART A: CRATER FORMATION (Q2-4)',
+    '  Drop ball #3 (d=9mm, m=3.0g) from h=50cm.',
+    '  Measure diameter D with the ruler. Repeat 5 times.',
+    '  Stir and level the sand after each impact!',
+    '',
+    'PART B: ROLLING ON RAIL & SAND (Q2-7)',
+    '  Rail at theta = 5 deg. Measure travel time t50 for l=50cm.',
+    '  Measure stopping distance L in sand track.',
+  ], [activePackage]);
+
+  const schemeLines = useMemo(() => [
+    'MARKING SCHEME — IPhO 2025',
+    '',
+    'QUESTION A.1 (0.6 pt):',
+    '  D = (23.8 +- 1.2) mm',
+    '  2 measures of D between 22-26mm (0.2pt)',
+    '  3 more measures (0.2pt)',
+    '',
+    'QUESTION B.2 (0.7 pt):',
+    '  t50 = (1.33 +- 0.04) s',
+    '',
+    'QUESTION B.6 (0.8 pt):',
+    '  L50 = (6.4 +- 0.5) cm',
+    '',
+    'QUESTION B.8 (0.2 pt):',
+    '  mu_eff = 0.80 +- 0.15',
+  ], []);
 
   return (
-    <div className="lab-app-container">
-      {/* Top Application Bar */}
-      <header className="lab-topbar">
-        <div className="lab-brand">
-          <div className="lab-logo-icon"><Atom size={18} /></div>
-          <div className="lab-title-group">
-            <h1>PhOLab | Laboratório Virtual de Física Olímpica</h1>
-            <span className="lab-subtitle">{challenge.title}</span>
+    <div className="app-container">
+      {/* pho.rs Academic Top Navbar */}
+      <header className="top-navbar">
+        <div className="brand-section">
+          <div className="brand-logo">Ψ</div>
+          <div className="brand-title-group">
+            <span className="brand-title">PhOLab</span>
+            <span className="brand-motto">May the pho.rs be with you!</span>
           </div>
         </div>
 
-        <div className="lab-topbar-center">
-          <div className="exam-seed-pill" title="Semente de Exame Determinística">
-            <Hash size={13} color="#f59e0b" />
-            <span>SEED: <strong>{examSeed}</strong></span>
-          </div>
-        </div>
-
-        <div className="lab-topbar-actions">
+        {/* 3 Core Operating Mode Tabs */}
+        <div className="mode-tabs">
           <button
-            className="btn-dock"
-            style={{ padding: '5px 12px', fontSize: 11 }}
-            onClick={() => setIsTaskDrawerOpen(true)}
+            className={`mode-tab-btn ${currentMode === 'hub' ? 'active' : ''}`}
+            onClick={() => setCurrentMode('hub')}
           >
-            <BookOpen size={13} color="#60a5fa" />
-            <span>Caderno IPhO</span>
+            <Compass size={14} />
+            <span>Painel de Experimentos (Hub)</span>
           </button>
+          <button
+            className={`mode-tab-btn ${currentMode === 'studio' ? 'active' : ''}`}
+            onClick={() => setCurrentMode('studio')}
+          >
+            <Wrench size={14} />
+            <span>Criador (Studio)</span>
+          </button>
+          <button
+            className={`mode-tab-btn ${currentMode === 'lab' ? 'active' : ''}`}
+            onClick={() => setCurrentMode('lab')}
+          >
+            <Play size={14} />
+            <span>Laboratório (Lab 3D)</span>
+          </button>
+        </div>
+
+        {/* Right Actions */}
+        <div className="navbar-actions">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#93c5fd', fontFamily: 'monospace' }}>
+            <Hash size={12} color="#f59e0b" />
+            <span>SEED: {examSeed}</span>
+          </div>
         </div>
       </header>
 
-      {/* 3D Viewport */}
-      <main className="viewport-container">
-        <Canvas
-          shadows
-          camera={{ position: [0, 0.7, 0.95], fov: 42 }}
-          gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
-          onPointerMissed={() => setSelectedCarrierId(null)}
-        >
-          <LabScene
-            cameraPreset={cameraPreset}
-            secondsRemaining={secondsRemaining}
-            isClockRunning={isClockRunning}
-            isBoxOpen={isBoxOpen}
-            isBoxOnFloor={isBoxOnFloor}
-            onToggleBoxOpen={() => setIsBoxOpen((prev) => !prev)}
-            onToggleBoxFloor={() => setIsBoxOnFloor((prev) => !prev)}
-            unpackedElements={unpackedElements}
-            onUnpackElement={handleUnpackElement}
-            laser={laser}
-            isLaserOn={isLaserOn}
-            onToggleLaserPower={() => setIsLaserOn((prev) => !prev)}
-            carriers={carriers}
-            selectedCarrierId={selectedCarrierId}
-            onSelectCarrier={setSelectedCarrierId}
-            onCarrierPositionChange={handleCarrierPositionChange}
-            onCarrierToggleLock={handleCarrierToggleLock}
-            onPolarizerAngleChange={handlePolarizerAngleChange}
-            transverseMicrometerMm={transverseMicrometerMm}
-            onTransverseMicrometerChange={setTransverseMicrometerMm}
-            trainResult={trainResult}
-            isMeterOn={isMeterOn}
-            onToggleMeterPower={() => setIsMeterOn((p) => !p)}
-            onTareMeter={handleTare}
-            meterUnitMode={meterUnitMode}
-            onCycleMeterUnit={() =>
-              setMeterUnitMode((p) => (p === 'uW' ? 'mW' : p === 'mW' ? 'Lux' : 'uW'))
-            }
-            challenge={challenge}
+      {/* Main Content Router */}
+      <main className="main-content-view">
+        {/* MODE 1: EXPERIMENT HUB */}
+        {currentMode === 'hub' && (
+          <ExperimentHub
+            currentPackage={activePackage}
+            onStartExperiment={() => setCurrentMode('lab')}
+            onOpenStudioNew={() => setCurrentMode('studio')}
+            onImportPackage={(pkg) => {
+              setActivePackage(pkg);
+              setCurrentMode('hub');
+            }}
           />
-        </Canvas>
+        )}
 
-        {/* Floating HUD Layer (Camera Presets, Laser toggle, Reset, Save/Export) */}
-        <div className="hud-overlay">
-          <LabHUD
-            cameraPreset={cameraPreset}
-            onSelectCameraPreset={setCameraPreset}
-            examSeed={examSeed}
-            onChangeSeed={handleChangeSeed}
-            laser={laser}
-            isLaserOn={isLaserOn}
-            onToggleLaserPower={() => setIsLaserOn((prev) => !prev)}
-            onResetRailPositions={handleResetRailPositions}
-            onOpenTaskDrawer={() => setIsTaskDrawerOpen(true)}
-            onExportState={handleExportState}
-            onImportState={handleImportState}
+        {/* MODE 2: CREATOR STUDIO */}
+        {currentMode === 'studio' && (
+          <CreatorStudio
+            initialPackage={activePackage}
+            onSavePackage={(pkg) => setActivePackage(pkg)}
+            onTestInLab={(pkg) => {
+              setActivePackage(pkg);
+              setCurrentMode('lab');
+            }}
           />
-        </div>
+        )}
+
+        {/* MODE 3: LABORATORY (3D Simulation) */}
+        {currentMode === 'lab' && (
+          <div className="lab-viewport-wrapper">
+            <Sand3DViewport
+              cameraPreset={cameraPreset}
+              state={experimentState}
+              ballsList={OFFICIAL_IPHO_BALLS}
+              selectedBall={selectedBall}
+              onSelectBall={setSelectedBall}
+              onDropBall={handleDropBall}
+              onStirAndLevel={handleStirAndLevel}
+              onRollRailBall={handleRollComplete}
+              taskLines={taskLines}
+              schemeLines={schemeLines}
+            />
+
+            {/* KSP Industrial Floating Control Panel (HUD) */}
+            <div className="lab-tactile-hud">
+              {/* Focal Cameras Pill */}
+              <div className="hud-pill-group">
+                <div className="hud-pill-title">
+                  <Eye size={13} />
+                  <span>Câmeras Focais</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                  <button
+                    className={`btn-ksp-action ${cameraPreset === 'overview' ? 'primary' : ''}`}
+                    onClick={() => setCameraPreset('overview')}
+                  >
+                    Bancada Geral
+                  </button>
+                  <button
+                    className={`btn-ksp-action ${cameraPreset === 'craters_bowl' ? 'primary' : ''}`}
+                    onClick={() => setCameraPreset('craters_bowl')}
+                  >
+                    Tigela / Crateras
+                  </button>
+                  <button
+                    className={`btn-ksp-action ${cameraPreset === 'stand_height' ? 'primary' : ''}`}
+                    onClick={() => setCameraPreset('stand_height')}
+                  >
+                    Suporte de Queda
+                  </button>
+                  <button
+                    className={`btn-ksp-action ${cameraPreset === 'inclined_rail' ? 'primary' : ''}`}
+                    onClick={() => setCameraPreset('inclined_rail')}
+                  >
+                    Trilho 5° & Areia
+                  </button>
+                  <button
+                    className={`btn-ksp-action ${cameraPreset === 'chronometer' ? 'primary' : ''}`}
+                    onClick={() => setCameraPreset('chronometer')}
+                  >
+                    Cronômetro
+                  </button>
+                  <button
+                    className={`btn-ksp-action ${cameraPreset === 'task_sheet' ? 'primary' : ''}`}
+                    onClick={() => setCameraPreset('task_sheet')}
+                  >
+                    Caderno Prova
+                  </button>
+                </div>
+              </div>
+
+              {/* Part A Controls: Crater Drop */}
+              <div className="hud-pill-group">
+                <div className="hud-pill-title">
+                  <CircleDot size={13} />
+                  <span>Parte A: Impacto de Crateras</span>
+                </div>
+
+                <div className="hud-row-item">
+                  <span className="label">Esfera Ativa:</span>
+                  <span className="value" style={{ color: '#f59e0b' }}>
+                    {selectedBall.name} ({selectedBall.massG}g)
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {OFFICIAL_IPHO_BALLS.map((b) => (
+                    <button
+                      key={b.id}
+                      className={`btn-ksp-action ${selectedBall.id === b.id ? 'primary' : ''}`}
+                      style={{ flex: 1, padding: '4px 0', fontSize: 11 }}
+                      onClick={() => setSelectedBall(b)}
+                    >
+                      #{b.id.split('-')[1]}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div className="hud-row-item">
+                    <span className="label">Altura de Queda (h):</span>
+                    <span className="value">{experimentState.dropHeightCm} cm</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="5"
+                    value={experimentState.dropHeightCm}
+                    onChange={(e) =>
+                      setExperimentState({ ...experimentState, dropHeightCm: Number(e.target.value) })
+                    }
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                  <button className="btn-ksp-action primary" style={{ flex: 1 }} onClick={handleDropBall}>
+                    Soltar Esfera
+                  </button>
+                  <button
+                    className={`btn-ksp-action ${experimentState.sandStirredAndLeveled ? 'success' : ''}`}
+                    onClick={handleStirAndLevel}
+                    title="Misturar areia com colher e nivelar com régua"
+                  >
+                    Nivelar Areia
+                  </button>
+                </div>
+
+                {experimentState.craterFormed && (
+                  <div style={{ background: 'rgba(0,0,0,0.4)', padding: '6px 8px', borderRadius: 4, marginTop: 4 }}>
+                    <div className="hud-row-item">
+                      <span className="label">Diâmetro Medido (D):</span>
+                      <span className="value" style={{ color: '#10b981' }}>
+                        {experimentState.lastImpactDiameterMm.toFixed(1)} mm
+                      </span>
+                    </div>
+                    <div className="hud-row-item">
+                      <span className="label">Energia de Impacto (E):</span>
+                      <span className="value">{experimentState.lastImpactEnergyJ.toExponential(2)} J</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Part B Controls: Inclined Rail & Sand */}
+              <div className="hud-pill-group">
+                <div className="hud-pill-title">
+                  <Activity size={13} />
+                  <span>Parte B: Trilho Inclinado 5°</span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div className="hud-row-item">
+                    <span className="label">Distância de Lançamento (l):</span>
+                    <span className="value">{experimentState.railReleaseDistanceCm} cm</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="10"
+                    value={experimentState.railReleaseDistanceCm}
+                    onChange={(e) =>
+                      setExperimentState({ ...experimentState, railReleaseDistanceCm: Number(e.target.value) })
+                    }
+                  />
+                </div>
+
+                <button
+                  className="btn-ksp-action primary"
+                  disabled={experimentState.ballRolling}
+                  onClick={handleRollBallOnRail}
+                >
+                  {experimentState.ballRolling ? 'Esfera Rolando...' : 'Soltar no Trilho (l)'}
+                </button>
+
+                {experimentState.ballStoppingDistanceCm > 0 && (
+                  <div style={{ background: 'rgba(0,0,0,0.4)', padding: '6px 8px', borderRadius: 4, marginTop: 4 }}>
+                    <div className="hud-row-item">
+                      <span className="label">Tempo Teórico (t):</span>
+                      <span className="value">{experimentState.ballTravelTimeS.toFixed(2)} s</span>
+                    </div>
+                    <div className="hud-row-item">
+                      <span className="label">Distância Parada (L):</span>
+                      <span className="value" style={{ color: '#10b981' }}>
+                        {experimentState.ballStoppingDistanceCm.toFixed(1)} cm
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
-
-      {/* Task & Marking Scheme Drawer */}
-      <TaskDrawer
-        isOpen={isTaskDrawerOpen}
-        onClose={() => setIsTaskDrawerOpen(false)}
-        challenge={challenge}
-      />
     </div>
   );
 };

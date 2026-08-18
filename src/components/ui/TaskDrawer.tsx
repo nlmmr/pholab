@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, BookOpen, CheckCircle, FileText, AlertTriangle, Key } from 'lucide-react';
+import { X, BookOpen, CheckCircle, FileText, AlertTriangle, Key } from '../icons/Icons';
 import { ExamChallenge } from '../../physics/types';
 
 interface TaskDrawerProps {

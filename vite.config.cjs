@@ -1,12 +1,13 @@
 const { defineConfig } = require('vite');
 
 module.exports = defineConfig({
-  base: './',
+  root: '.',
   esbuild: {
     jsx: 'automatic'
   },
   server: {
     port: 3000,
-    open: false
+    open: false,
+    host: '127.0.0.1'
   }
 });

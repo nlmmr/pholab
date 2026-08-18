@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Crosshair } from 'lucide-react';
+import { Ruler, ChevronLeft, ChevronRight, RotateCcw } from '../icons/Icons';
 
 interface MicrometerStageHUDProps {
   transversePosMm: number;
@@ -20,7 +20,7 @@ export const MicrometerStageHUD: React.FC<MicrometerStageHUDProps> = ({
     <div className="micrometer-hud hud-interactive">
       <div className="micrometer-header">
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Crosshair size={14} color="#f59e0b" />
+          <Ruler size={14} color="#f59e0b" />
           ESTÁGIO MICROMÉTRICO (X)
         </span>
         <button
