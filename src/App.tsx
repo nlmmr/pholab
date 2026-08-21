@@ -1,319 +1,68 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import {
-  Compass,
-  Layers,
-  Wrench,
-  Play,
-  RotateCcw,
-  BookOpen,
-  Timer,
-  Ruler,
-  CircleDot,
-  Activity,
-  Eye,
-  Settings,
-  Award,
-  Hash,
-  Clock
-} from './components/icons/Icons';
+import React, { Suspense, useState } from 'react';
+import { IPHO_2024_E2_DEFINITION } from './experiments/ipho-2024-e2/definition';
 
-import { AppMode, BallSpec, PhOLabPackage, SandCraterExperimentState } from './domain/types';
-import { IPHO_2025_SAND_CRATERS_PACKAGE } from './experiments/IPhO2025SandCraters';
-import { SandImpactSolver } from './domain/physics/SandImpactSolver';
-import { RailRollingSolver } from './domain/physics/RailRollingSolver';
-import { OFFICIAL_IPHO_BALLS } from './physics/SandImpactPhysics';
-import { ExperimentHub } from './modes/hub/ExperimentHub';
-import { CreatorStudio } from './modes/studio/CreatorStudio';
-import { LabViewport, LabCameraPreset } from './modes/lab/LabViewport';
+const IPhO2024E2Lab = React.lazy(() =>
+  import('./experiments/ipho-2024-e2/components/IPhO2024E2Lab').then((module) => ({ default: module.IPhO2024E2Lab })),
+);
+
+const FUTURE_AREAS = [
+  { name: 'Mechanics', glyph: '↙' },
+  { name: 'Electricity', glyph: '⌁' },
+  { name: 'Thermodynamics', glyph: '∿' },
+];
+
+const Home: React.FC<{ onStart: () => void }> = ({ onStart }) => (
+  <div className="home-shell">
+    <header className="home-nav">
+      <a className="home-brand" href="#top"><span className="brand-mark">Φ</span><strong>PhOLab</strong></a>
+      <span className="home-nav-note">Real experimental practice, in your browser.</span>
+    </header>
+
+    <main id="top" className="home-main">
+      <section className="hero-section">
+        <span className="eyebrow">Experimental physics · hands on</span>
+        <h1>Train for the experiment,<br /><em>not the interface.</em></h1>
+        <p>Practice the same observation, alignment, and measurement decisions demanded by international physics olympiads.</p>
+      </section>
+
+      <section className="catalog-section" aria-labelledby="available-title">
+        <div className="section-heading"><div><span className="eyebrow">Experiment library</span><h2 id="available-title">Available now</h2></div><span className="catalog-count">01 experiment</span></div>
+
+        <article className="featured-experiment">
+          <div className="experiment-copy">
+            <div className="experiment-labels"><span>IPhO 2024</span><span>Optics</span><span>Experimental</span></div>
+            <h3>{IPHO_2024_E2_DEFINITION.title}</h3>
+            <p>{IPHO_2024_E2_DEFINITION.description}</p>
+            <div className="experiment-meta"><div><small>Competition time</small><strong>5 hours</strong></div><div><small>MVP scope</small><strong>Part A complete</strong></div><div><small>Mode</small><strong>IPhO Original</strong></div></div>
+            <button className="start-button" onClick={onStart}><span>Start experiment</span><i>→</i></button>
+          </div>
+          <div className="apparatus-preview" aria-label="Illustration of the phase-step diffraction apparatus">
+            <div className="preview-glow" />
+            <div className="preview-screen"><i /></div>
+            <div className="preview-bench">
+              <div className="preview-platform"><span className="preview-dial" /><span className="preview-holder" /><span className="preview-laser" /><span className="preview-lens" /><i className="preview-beam" /></div>
+              <div className="preview-board"><i /><i /><span /></div>
+              <div className="preview-power" />
+            </div>
+            <span className="preview-caption">IPhO 2024 E2 apparatus · Part A</span>
+          </div>
+        </article>
+      </section>
+
+      <section className="future-section">
+        <div className="section-heading"><div><span className="eyebrow">The lab expands next</span><h2>More areas</h2></div></div>
+        <div className="future-grid">{FUTURE_AREAS.map((area) => <div className="future-card" key={area.name}><span>{area.glyph}</span><strong>{area.name}</strong><small>Planned</small></div>)}</div>
+      </section>
+    </main>
+    <footer className="home-footer"><strong>PhOLab</strong><span>Built around official olympiad experiments.</span></footer>
+  </div>
+);
 
 export const App: React.FC = () => {
-  // Navigation Mode: Hub (Catalog), Studio (Creator), Lab (3D Simulation)
-  const [currentMode, setCurrentMode] = useState<AppMode>('hub');
-
-  // Active Experiment Package (.pholab)
-  const [activePackage, setActivePackage] = useState<PhOLabPackage>(IPHO_2025_SAND_CRATERS_PACKAGE);
-  const [examSeed, setExamSeed] = useState<string>('IPHO-2025-MARS');
-
-  // Exam Elapsed Timer (Tempo de Prova Decorrido)
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
-  const [isTimerRunning, setIsTimerRunning] = useState<boolean>(true);
-
-  // Physics Solvers
-  const impactSolver = useMemo(() => new SandImpactSolver(1.8), []);
-  const rollingSolver = useMemo(() => new RailRollingSolver(), []);
-
-  // Camera Preset for 3D Lab
-  const [cameraPreset, setCameraPreset] = useState<LabCameraPreset>('overview');
-
-  // Sand Crater Experiment Runtime State
-  const [selectedBall, setSelectedBall] = useState<BallSpec>(OFFICIAL_IPHO_BALLS[2]);
-  const [experimentState, setExperimentState] = useState<SandCraterExperimentState>({
-    selectedBallId: OFFICIAL_IPHO_BALLS[2].id,
-    dropHeightCm: 50.0,
-    sandStirredAndLeveled: true,
-    craterFormed: false,
-    lastImpactDiameterMm: 0,
-    lastImpactEnergyJ: 0,
-    railAngleDeg: 5.0,
-    railReleaseDistanceCm: 50.0,
-    ballRolling: false,
-    ballTravelTimeS: 0,
-    ballStoppingDistanceCm: 0,
-    isChronometerRunning: false,
-    chronometerTimeS: 0,
-    gimbalMode: 'offset',
-  });
-
-  // Elapsed exam timer tick
-  useEffect(() => {
-    if (!isTimerRunning) return;
-    const interval = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isTimerRunning]);
-
-  // Stopwatch timer tick
-  useEffect(() => {
-    if (!experimentState.isChronometerRunning) return;
-    const timer = setInterval(() => {
-      setExperimentState((prev) => ({
-        ...prev,
-        chronometerTimeS: prev.chronometerTimeS + 0.01,
-      }));
-    }, 10);
-    return () => clearInterval(timer);
-  }, [experimentState.isChronometerRunning]);
-
-  // --- Part A Actions: Crater Impact ---
-  const handleDropBall = useCallback(() => {
-    const impact = impactSolver.computeImpact(
-      selectedBall,
-      experimentState.dropHeightCm,
-      experimentState.sandStirredAndLeveled
-    );
-
-    setExperimentState((prev) => ({
-      ...prev,
-      craterFormed: true,
-      sandStirredAndLeveled: false,
-      lastImpactDiameterMm: impact.craterDiameterMm,
-      lastImpactEnergyJ: impact.impactEnergyJ,
-    }));
-  }, [impactSolver, selectedBall, experimentState.dropHeightCm, experimentState.sandStirredAndLeveled]);
-
-  const handleStirAndLevel = useCallback(() => {
-    setExperimentState((prev) => ({
-      ...prev,
-      sandStirredAndLeveled: true,
-      craterFormed: false,
-      lastImpactDiameterMm: 0,
-    }));
-  }, []);
-
-  // --- Part B Actions: Inclined Rail & Sand Track ---
-  const handleRollBallOnRail = useCallback(() => {
-    const rolling = rollingSolver.computeRolling(
-      experimentState.railReleaseDistanceCm,
-      experimentState.railAngleDeg,
-      experimentState.sandStirredAndLeveled
-    );
-
-    setExperimentState((prev) => ({
-      ...prev,
-      ballRolling: true,
-      ballTravelTimeS: rolling.travelTimeS,
-      ballStoppingDistanceCm: rolling.stoppingDistanceCm,
-    }));
-  }, [rollingSolver, experimentState.railReleaseDistanceCm, experimentState.railAngleDeg, experimentState.sandStirredAndLeveled]);
-
-  const handleRollComplete = useCallback(() => {
-    setExperimentState((prev) => ({
-      ...prev,
-      ballRolling: false,
-    }));
-  }, []);
-
-  const handleToggleChronometer = useCallback(() => {
-    setExperimentState((prev) => ({
-      ...prev,
-      isChronometerRunning: !prev.isChronometerRunning,
-    }));
-  }, []);
-
-  const handleResetChronometer = useCallback(() => {
-    setExperimentState((prev) => ({
-      ...prev,
-      isChronometerRunning: false,
-      chronometerTimeS: 0,
-    }));
-  }, []);
-
-  // Format Elapsed Time: HH:MM:SS
-  const formattedElapsedTime = useMemo(() => {
-    const h = Math.floor(elapsedSeconds / 3600);
-    const m = Math.floor((elapsedSeconds % 3600) / 60);
-    const s = elapsedSeconds % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }, [elapsedSeconds]);
-
-  return (
-    <div className="app-container">
-      {/* pho.rs Academic Top Navbar */}
-      <header className="top-navbar">
-        <div className="brand-section">
-          <div className="brand-logo">Ψ</div>
-          <div className="brand-title-group">
-            <span className="brand-title">PhOLab</span>
-            <span className="brand-motto">May the pho.rs be with you!</span>
-          </div>
-        </div>
-
-        {/* 3 Core Operating Mode Tabs */}
-        <div className="mode-tabs">
-          <button
-            className={`mode-tab-btn ${currentMode === 'hub' ? 'active' : ''}`}
-            onClick={() => setCurrentMode('hub')}
-          >
-            <Compass size={14} />
-            <span>Painel de Experimentos (Hub)</span>
-          </button>
-          <button
-            className={`mode-tab-btn ${currentMode === 'studio' ? 'active' : ''}`}
-            onClick={() => setCurrentMode('studio')}
-          >
-            <Wrench size={14} />
-            <span>Criador (Studio)</span>
-          </button>
-          <button
-            className={`mode-tab-btn ${currentMode === 'lab' ? 'active' : ''}`}
-            onClick={() => setCurrentMode('lab')}
-          >
-            <Play size={14} />
-            <span>Laboratório (Lab 3D)</span>
-          </button>
-        </div>
-
-        {/* Right Actions: Elapsed Exam Timer & Seed */}
-        <div className="navbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'rgba(15, 23, 42, 0.45)',
-            padding: '4px 10px',
-            borderRadius: 6,
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            fontSize: 12,
-            fontFamily: 'monospace',
-            color: '#fde047'
-          }}>
-            <Clock size={14} color="#f59e0b" />
-            <span>DECORRIDO: {formattedElapsedTime}</span>
-            <span style={{ color: '#94a3b8' }}>/ {activePackage.durationMinutes} min</span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#93c5fd', fontFamily: 'monospace' }}>
-            <Hash size={12} color="#f59e0b" />
-            <span>SEED: {examSeed}</span>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content Router */}
-      <main className="main-content-view">
-        {/* MODE 1: EXPERIMENT HUB */}
-        {currentMode === 'hub' && (
-          <ExperimentHub
-            currentPackage={activePackage}
-            onStartExperiment={() => setCurrentMode('lab')}
-            onOpenStudioNew={() => setCurrentMode('studio')}
-            onImportPackage={(pkg) => {
-              setActivePackage(pkg);
-              setCurrentMode('hub');
-            }}
-          />
-        )}
-
-        {/* MODE 2: CREATOR STUDIO */}
-        {currentMode === 'studio' && (
-          <CreatorStudio
-            initialPackage={activePackage}
-            onSavePackage={(pkg) => setActivePackage(pkg)}
-            onTestInLab={(pkg) => {
-              setActivePackage(pkg);
-              setCurrentMode('lab');
-            }}
-          />
-        )}
-
-        {/* MODE 3: LABORATORY (Hands-on 3D Simulation) */}
-        {currentMode === 'lab' && (
-          <div className="lab-viewport-wrapper">
-            <LabViewport
-              cameraPreset={cameraPreset}
-              state={experimentState}
-              ballsList={OFFICIAL_IPHO_BALLS}
-              selectedBall={selectedBall}
-              elapsedSeconds={elapsedSeconds}
-              onSelectBall={setSelectedBall}
-              onDropBall={handleDropBall}
-              onStirAndLevel={handleStirAndLevel}
-              onRollRailBall={handleRollComplete}
-              onToggleChronometer={handleToggleChronometer}
-              onResetChronometer={handleResetChronometer}
-            />
-
-            {/* Minimalist Floating Camera Presets HUD */}
-            <div className="lab-tactile-hud">
-              <div className="hud-pill-group">
-                <div className="hud-pill-title">
-                  <Eye size={13} />
-                  <span>Câmeras Focais</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-                  <button
-                    className={`btn-ksp-action ${cameraPreset === 'overview' ? 'primary' : ''}`}
-                    onClick={() => setCameraPreset('overview')}
-                  >
-                    Bancada Geral
-                  </button>
-                  <button
-                    className={`btn-ksp-action ${cameraPreset === 'kit_box' ? 'primary' : ''}`}
-                    onClick={() => setCameraPreset('kit_box')}
-                  >
-                    Caixa do Kit
-                  </button>
-                  <button
-                    className={`btn-ksp-action ${cameraPreset === 'craters_bowl' ? 'primary' : ''}`}
-                    onClick={() => setCameraPreset('craters_bowl')}
-                  >
-                    Tigela / Areia
-                  </button>
-                  <button
-                    className={`btn-ksp-action ${cameraPreset === 'stand_height' ? 'primary' : ''}`}
-                    onClick={() => setCameraPreset('stand_height')}
-                  >
-                    Suporte Vertical
-                  </button>
-                  <button
-                    className={`btn-ksp-action ${cameraPreset === 'inclined_rail' ? 'primary' : ''}`}
-                    onClick={() => setCameraPreset('inclined_rail')}
-                  >
-                    Trilho 5° & Pista
-                  </button>
-                  <button
-                    className={`btn-ksp-action ${cameraPreset === 'chronometer' ? 'primary' : ''}`}
-                    onClick={() => setCameraPreset('chronometer')}
-                  >
-                    Cronômetro
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
+  const [screen, setScreen] = useState<'home' | 'experiment'>('home');
+  return screen === 'home' ? <Home onStart={() => setScreen('experiment')} /> : (
+    <Suspense fallback={<div className="lab-loading"><span className="brand-mark">Φ</span><strong>Preparing the optics bench…</strong></div>}>
+      <IPhO2024E2Lab onExit={() => setScreen('home')} />
+    </Suspense>
   );
 };
