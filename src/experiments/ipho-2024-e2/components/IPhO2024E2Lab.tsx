@@ -14,14 +14,41 @@ import { HUDOverlayRuler, CameraCalibration } from '../../../components/HUDOverl
 
 const STORAGE_KEY = 'pholab:ipho-2024-e2:part-a';
 
-function restoreState() {
+function restoreState(): IPhO2024E2State {
+  const initial = createInitialExperimentState();
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (!stored) return createInitialExperimentState();
+    if (!stored) return initial;
     const parsed = JSON.parse(stored);
-    return { ...createInitialExperimentState(), ...parsed };
+    return {
+      ...initial,
+      ...parsed,
+      assemblyMode: parsed.assemblyMode ?? initial.assemblyMode,
+      kit: {
+        ...initial.kit,
+        ...(parsed.kit || {}),
+        fasteningRodsLoose: Array.isArray(parsed.kit?.fasteningRodsLoose) && parsed.kit.fasteningRodsLoose.length === 4
+          ? parsed.kit.fasteningRodsLoose
+          : initial.kit.fasteningRodsLoose,
+      },
+      positions: {
+        ...initial.positions,
+        ...(parsed.positions || {}),
+      },
+      apparatus: {
+        ...initial.apparatus,
+        ...(parsed.apparatus || {}),
+      },
+      electronics: {
+        ...initial.electronics,
+        ...(parsed.electronics || {}),
+        laserCurrentMa: typeof parsed.electronics?.laserCurrentMa === 'number'
+          ? parsed.electronics.laserCurrentMa
+          : initial.electronics.laserCurrentMa,
+      },
+    };
   } catch {
-    return createInitialExperimentState();
+    return initial;
   }
 }
 
@@ -476,7 +503,7 @@ export const IPhO2024E2Lab: React.FC<LabProps> = ({ onExit }) => {
     if (selected === 'current-knob') {
       return {
         label: 'Laser current control knob',
-        hint: `Laser current set to ${state.electronics.laserCurrentMa.toFixed(1)} mA (nominal 15.0 mA). Drag ←→ to adjust.`,
+        hint: `Laser current set to ${(state.electronics?.laserCurrentMa ?? 15.0).toFixed(1)} mA (nominal 15.0 mA). Drag ←→ to adjust.`,
         buttons: [
           {
             label: 'Nominal (15.0 mA)',

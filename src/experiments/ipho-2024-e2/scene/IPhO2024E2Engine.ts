@@ -1777,18 +1777,18 @@ export class IPhO2024E2Engine {
 
     // Sincronizar alavanca física da chave toggle On/Off
     if (this.toggleLever) {
-      this.toggleLever.rotation.x = state.electronics.switchOn ? -0.42 : 0.42;
+      this.toggleLever.rotation.x = state.electronics?.switchOn ? -0.42 : 0.42;
     }
 
     // Sincronizar rotação angular do knob de corrente (0 a 30 mA)
+    const currentVal = typeof state.electronics?.laserCurrentMa === 'number' ? state.electronics.laserCurrentMa : 15.0;
     if (this.currentKnobMesh) {
-      const currentFrac = Math.max(0, Math.min(1, state.electronics.laserCurrentMa / 30));
+      const currentFrac = Math.max(0, Math.min(1, currentVal / 30));
       this.currentKnobMesh.rotation.y = (-135 + currentFrac * 270) * (Math.PI / 180);
     }
 
-    const circuitReady = state.electronics.laserToBoard && state.electronics.boardToPower;
+    const circuitReady = Boolean(state.electronics?.laserToBoard && state.electronics?.boardToPower);
     this.displayMesh.setPower(circuitReady);
-    const currentVal = state.electronics.laserCurrentMa;
     this.displayMesh.setText(`I(Laser)=${currentVal.toFixed(1)} mA`);
     this.displayMesh.renderDisplay(emitting);
 
@@ -2113,7 +2113,7 @@ export class IPhO2024E2Engine {
       this.controls.isLocked = true;
     } else if (id === 'current-knob') {
       this.callbacks.onSelect(id);
-      this.drag = { type: 'current', startX: event.clientX, startY: event.clientY, startValue: this.state.electronics.laserCurrentMa, moved: false };
+      this.drag = { type: 'current', startX: event.clientX, startY: event.clientY, startValue: this.state.electronics?.laserCurrentMa ?? 15.0, moved: false };
       this.controls.isLocked = true;
     }
     if (this.drag) this.renderer.domElement.setPointerCapture(event.pointerId);

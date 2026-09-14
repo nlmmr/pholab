@@ -497,25 +497,27 @@ export function experimentReducer(
 }
 
 export function isCircuitComplete(state: IPhO2024E2State): boolean {
-  return state.electronics.laserToBoard && state.electronics.boardToPower;
+  return Boolean(state?.electronics?.laserToBoard && state?.electronics?.boardToPower);
 }
 
 export function isLaserEmitting(state: IPhO2024E2State): boolean {
-  return isCircuitComplete(state) && state.electronics.switchOn && state.electronics.laserCurrentMa > 1.0;
+  const current = state?.electronics?.laserCurrentMa ?? 15.0;
+  return isCircuitComplete(state) && Boolean(state?.electronics?.switchOn) && current > 1.0;
 }
 
 export function canObservePattern(state: IPhO2024E2State): boolean {
-  const hasHolder = state.apparatus.s1Installed || state.apparatus.installedHolder !== 'none';
-  return (
-    state.kit.platformPlaced &&
+  const hasHolder = Boolean(state?.apparatus?.s1Installed || state?.apparatus?.installedHolder !== 'none');
+  return Boolean(
+    state?.kit?.platformPlaced &&
     hasHolder &&
-    state.apparatus.screenPlaced &&
+    state?.apparatus?.screenPlaced &&
     isLaserEmitting(state)
   );
 }
 
 export function patternVisibility(state: IPhO2024E2State): number {
   if (!canObservePattern(state)) return 0;
-  const currentRatio = Math.max(0, Math.min(1.5, state.electronics.laserCurrentMa / 15.0));
+  const current = state?.electronics?.laserCurrentMa ?? 15.0;
+  const currentRatio = Math.max(0, Math.min(1.5, current / 15.0));
   return alignmentQuality(state.apparatus) * currentRatio;
 }

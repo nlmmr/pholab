@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  configureForPart,
   createInitialExperimentState,
   experimentReducer,
   isCircuitComplete,
   isLaserEmitting,
+  patternVisibility,
 } from './state';
 
 describe('IPhO 2024 E2 experiment state', () => {
@@ -398,6 +400,19 @@ describe('IPhO 2024 E2 experiment state', () => {
     expect(state.kit.bottleRemoved).toBe(true);
     state = experimentReducer(state, { type: 'POUR_LIQUID' });
     expect(state.apparatus.liquidPoured).toBe(true);
+  });
+
+  it('safely handles legacy or missing state properties without throwing', () => {
+    const legacyState = configureForPart(createInitialExperimentState(), 'A');
+    legacyState.electronics = {
+      laserToBoard: true,
+      boardToPower: true,
+      switchOn: true,
+      // laserCurrentMa omitted intentionally to simulate older saved state
+    } as any;
+
+    expect(isLaserEmitting(legacyState)).toBe(true);
+    expect(patternVisibility(legacyState)).toBeGreaterThan(0);
   });
 });
 
