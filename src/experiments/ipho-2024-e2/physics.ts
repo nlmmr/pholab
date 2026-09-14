@@ -8,11 +8,35 @@ export interface PhaseParameters {
 }
 
 export const DEFAULT_PHASE_PARAMETERS: PhaseParameters = {
-  thicknessMm: IPHO_2024_E2_CONFIG.hiddenSlideThicknessMm,
+  thicknessMm: IPHO_2024_E2_CONFIG.hiddenSlideThicknessS1Mm,
   wavelengthNm: IPHO_2024_E2_CONFIG.wavelengthNm,
   glassIndex: IPHO_2024_E2_CONFIG.glassIndex,
   ambientIndex: IPHO_2024_E2_CONFIG.ambientIndex,
 };
+
+export function resolvePhaseParameters(state?: {
+  apparatus?: {
+    installedHolder?: 'none' | 's1' | 's2';
+    cuvettePlaced?: boolean;
+    liquidPoured?: boolean;
+  };
+}): PhaseParameters {
+  if (!state?.apparatus) return DEFAULT_PHASE_PARAMETERS;
+
+  const isS2 = state.apparatus.installedHolder === 's2';
+  const isLiquid = !!(state.apparatus.cuvettePlaced && state.apparatus.liquidPoured);
+
+  return {
+    thicknessMm: isS2
+      ? IPHO_2024_E2_CONFIG.hiddenSlideThicknessS2Mm
+      : IPHO_2024_E2_CONFIG.hiddenSlideThicknessS1Mm,
+    wavelengthNm: IPHO_2024_E2_CONFIG.wavelengthNm,
+    glassIndex: IPHO_2024_E2_CONFIG.glassIndex,
+    ambientIndex: isLiquid
+      ? IPHO_2024_E2_CONFIG.hiddenLiquidIndexN
+      : IPHO_2024_E2_CONFIG.ambientIndex,
+  };
+}
 
 export function phaseDifference(
   angleDeg: number,

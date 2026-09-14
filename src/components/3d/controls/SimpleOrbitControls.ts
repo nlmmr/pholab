@@ -57,10 +57,13 @@ export class SimpleOrbitControls {
   };
 
   private onPointerDown = (e: PointerEvent) => {
-    if (this.isLocked) return;
+    if (this.isLocked || e.altKey) return;
 
-    this.focusSpherical = null;
-    this.focusTarget = null;
+    // Apenas limpa o foco se for uma ação manual direta (botão esquerdo ou do meio)
+    if (e.button === 0 || e.button === 1) {
+      this.focusSpherical = null;
+      this.focusTarget = null;
+    }
     this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     this.previousMousePosition = { x: e.clientX, y: e.clientY };
@@ -195,7 +198,15 @@ export class SimpleOrbitControls {
     this.camera.lookAt(this.target);
   }
 
+  public resetInteractions() {
+    this.isOrbiting = false;
+    this.isPanning = false;
+    this.sphericalDelta.set(0, 0, 0);
+    this.panOffset.set(0, 0, 0);
+  }
+
   public setView(position: THREE.Vector3, target: THREE.Vector3) {
+    this.resetInteractions();
     this.focusTarget = target.clone();
     this.focusSpherical = new THREE.Spherical().setFromVector3(position.clone().sub(target));
   }

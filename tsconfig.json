@@ -15,9 +15,13 @@
   "include": [
     "src/App.tsx",
     "src/main.tsx",
-    "src/experiments/ipho-2024-e2/**/*.ts",
-    "src/experiments/ipho-2024-e2/**/*.tsx",
-    "src/shared/**/*.tsx",
-    "src/components/3d/controls/SimpleOrbitControls.ts"
+    "src/core/**/*.ts",
+    "src/core/**/*.tsx",
+    "src/library/**/*.ts",
+    "src/library/**/*.tsx",
+    "src/experiments/**/*.ts",
+    "src/experiments/**/*.tsx",
+    "src/shared/**/*.ts",
+    "src/shared/**/*.tsx"
   ]
 }

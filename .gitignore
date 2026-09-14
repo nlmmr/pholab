@@ -24,4 +24,6 @@ lerna-debug.log*
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
+# Agent workspaces & local dev
+.agents/
+pholab-2.0/

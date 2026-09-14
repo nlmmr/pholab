@@ -5,13 +5,22 @@ import { Measurement } from '../../experiments/ipho-2024-e2/state';
 interface NotebookProps {
   open: boolean;
   measurements: Measurement[];
+  activePart?: 'A' | 'B' | 'C' | 'D';
   onClose: () => void;
   onAdd: (measurement: Measurement) => void;
   onUpdate: (measurement: Measurement) => void;
   onDelete: (id: string) => void;
 }
 
-export const Notebook: React.FC<NotebookProps> = ({ open, measurements, onClose, onAdd, onUpdate, onDelete }) => {
+export const Notebook: React.FC<NotebookProps> = ({
+  open,
+  measurements,
+  activePart = 'A',
+  onClose,
+  onAdd,
+  onUpdate,
+  onDelete,
+}) => {
   const [fringeIndex, setFringeIndex] = useState('');
   const [angleDeg, setAngleDeg] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -31,7 +40,12 @@ export const Notebook: React.FC<NotebookProps> = ({ open, measurements, onClose,
     const m = Number(fringeIndex);
     const theta = Number(angleDeg);
     if (!Number.isFinite(m) || !Number.isFinite(theta) || m < 0 || theta < 0 || theta > 90) return;
-    const measurement: Measurement = { id: editingId ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`, fringeIndex: m, angleDeg: theta };
+    const measurement: Measurement = {
+      id: editingId ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      fringeIndex: m,
+      angleDeg: theta,
+      part: activePart,
+    };
     if (editingId) onUpdate(measurement);
     else onAdd(measurement);
     clearForm();
@@ -44,11 +58,11 @@ export const Notebook: React.FC<NotebookProps> = ({ open, measurements, onClose,
   };
 
   const exportCsv = () => {
-    const csv = ['m,theta_deg', ...sorted.map((row) => `${row.fringeIndex},${row.angleDeg}`)].join('\n');
+    const csv = ['m,theta_deg,part', ...sorted.map((row) => `${row.fringeIndex},${row.angleDeg},${row.part ?? activePart}`)].join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'ipho-2024-e2-part-a.csv';
+    anchor.download = `ipho-2024-e2-part-${activePart.toLowerCase()}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -58,7 +72,7 @@ export const Notebook: React.FC<NotebookProps> = ({ open, measurements, onClose,
       <div className="sheet-handle" />
       <header className="sheet-header">
         <div>
-          <span className="eyebrow">Part A · data collection</span>
+          <span className="eyebrow">Part {activePart} · data collection</span>
           <h2>Experimental notebook</h2>
         </div>
         <button className="icon-button" onClick={onClose} aria-label="Close notebook">×</button>
