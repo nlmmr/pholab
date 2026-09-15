@@ -16,10 +16,12 @@ export class SimpleOrbitControls {
 
   private isOrbiting = false;
   private isPanning = false;
+  private isLeftPointerDown = false;
+  private pointerDownPosition = { x: 0, y: 0 };
   private previousMousePosition = { x: 0, y: 0 };
   private spherical = new THREE.Spherical();
   private sphericalDelta = new THREE.Spherical();
-  private panOffset = new THREE.Vector3();
+  private panDelta = new THREE.Vector3();
   private focusSpherical: THREE.Spherical | null = null;
   private focusTarget: THREE.Vector3 | null = null;
   private activePointers = new Map<number, { x: number; y: number }>();
@@ -38,16 +40,20 @@ export class SimpleOrbitControls {
 
   private bindEvents() {
     this.domElement.addEventListener('pointerdown', this.onPointerDown);
-    window.addEventListener('pointermove', this.onPointerMove);
-    window.addEventListener('pointerup', this.onPointerUp);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pointermove', this.onPointerMove);
+      window.addEventListener('pointerup', this.onPointerUp);
+    }
     this.domElement.addEventListener('wheel', this.onWheel, { passive: false });
     this.domElement.addEventListener('contextmenu', this.onContextMenu);
   }
 
   public dispose() {
     this.domElement.removeEventListener('pointerdown', this.onPointerDown);
-    window.removeEventListener('pointermove', this.onPointerMove);
-    window.removeEventListener('pointerup', this.onPointerUp);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pointermove', this.onPointerMove);
+      window.removeEventListener('pointerup', this.onPointerUp);
+    }
     this.domElement.removeEventListener('wheel', this.onWheel);
     this.domElement.removeEventListener('contextmenu', this.onContextMenu);
   }
@@ -67,14 +73,17 @@ export class SimpleOrbitControls {
     this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     this.previousMousePosition = { x: e.clientX, y: e.clientY };
+    this.pointerDownPosition = { x: e.clientX, y: e.clientY };
 
     if (e.pointerType === 'touch') {
       if (this.activePointers.size === 2) {
         const [first, second] = [...this.activePointers.values()];
         this.pinchDistance = Math.hypot(second.x - first.x, second.y - first.y);
         this.isOrbiting = false;
+        this.isLeftPointerDown = false;
       } else {
-        this.isOrbiting = true;
+        this.isLeftPointerDown = true;
+        this.isOrbiting = false;
       }
       e.preventDefault();
       return;
@@ -85,8 +94,9 @@ export class SimpleOrbitControls {
       this.isPanning = true;
       e.preventDefault();
     } else if (e.button === 0) {
-      // Left Mouse Click -> Orbit Camera
-      this.isOrbiting = true;
+      // Left Mouse Click -> Deconflict single click selection: wait for movement > 4.0 px before orbiting
+      this.isLeftPointerDown = true;
+      this.isOrbiting = false;
     } else if (e.button === 2) {
       // Right Click -> Secondary Pan option for users without a middle button
       this.isPanning = true;
@@ -112,6 +122,16 @@ export class SimpleOrbitControls {
       this.pinchDistance = distance;
       return;
     }
+
+    // Deconflict LMB orbit from selection: require movement > 4 px before starting orbit rotation
+    if (this.isLeftPointerDown && !this.isOrbiting) {
+      const dist = Math.hypot(e.clientX - this.pointerDownPosition.x, e.clientY - this.pointerDownPosition.y);
+      if (dist > 4.0) {
+        this.isOrbiting = true;
+        this.previousMousePosition = { x: e.clientX, y: e.clientY };
+      }
+    }
+
     if (!this.isOrbiting && !this.isPanning) return;
 
     const deltaX = e.clientX - this.previousMousePosition.x;
@@ -119,13 +139,13 @@ export class SimpleOrbitControls {
     this.previousMousePosition = { x: e.clientX, y: e.clientY };
 
     if (this.isPanning) {
-      // Pan Camera: move both target and camera along camera's view plane
-      const panSpeed = 0.0012 * Math.max(0.2, this.spherical.radius);
+      // Pan Camera: move both target and camera along camera's view plane (panSpeed = 0.00040)
+      const panSpeed = 0.00040 * Math.max(0.2, this.spherical.radius);
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
 
-      this.panOffset.addScaledVector(right, -deltaX * panSpeed);
-      this.panOffset.addScaledVector(up, deltaY * panSpeed);
+      this.panDelta.addScaledVector(right, -deltaX * panSpeed);
+      this.panDelta.addScaledVector(up, deltaY * panSpeed);
     } else if (this.isOrbiting) {
       // Orbit Camera: rotate spherical theta & phi
       const rotateSpeed = 0.0045;
@@ -139,9 +159,12 @@ export class SimpleOrbitControls {
     if (this.activePointers.size === 1) {
       const [remaining] = [...this.activePointers.values()];
       this.previousMousePosition = remaining;
-      this.isOrbiting = true;
+      this.pointerDownPosition = remaining;
+      this.isLeftPointerDown = true;
+      this.isOrbiting = false;
     } else {
       this.isOrbiting = false;
+      this.isLeftPointerDown = false;
     }
     if (this.activePointers.size < 2) this.pinchDistance = 0;
     this.isPanning = false;
@@ -176,8 +199,12 @@ export class SimpleOrbitControls {
         this.focusSpherical = null;
       }
     }
-    this.target.add(this.panOffset);
-    this.panOffset.set(0, 0, 0);
+    this.target.add(this.panDelta);
+    if (this.enableDamping) {
+      this.panDelta.multiplyScalar(1 - this.dampingFactor);
+    } else {
+      this.panDelta.set(0, 0, 0);
+    }
 
     this.spherical.theta += this.sphericalDelta.theta;
     this.spherical.phi += this.sphericalDelta.phi;
@@ -201,8 +228,9 @@ export class SimpleOrbitControls {
   public resetInteractions() {
     this.isOrbiting = false;
     this.isPanning = false;
+    this.isLeftPointerDown = false;
     this.sphericalDelta.set(0, 0, 0);
-    this.panOffset.set(0, 0, 0);
+    this.panDelta.set(0, 0, 0);
   }
 
   public setView(position: THREE.Vector3, target: THREE.Vector3) {

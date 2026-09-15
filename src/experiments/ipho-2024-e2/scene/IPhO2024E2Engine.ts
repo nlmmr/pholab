@@ -12,6 +12,14 @@ import {
 import { AudioManager } from '../../../core/audio/AudioManager';
 import { LabEnvironment } from '../../../core/engine/LabEnvironment';
 import { CameraCalibration } from '../../../components/HUDOverlayRuler';
+import {
+  RigidBodySimulator,
+  RigidBody,
+  OBBCollider,
+  CylinderCollider,
+} from '../../../core/physics';
+import { assetRegistry } from '../../../core/assets';
+import { IPHO_2024_E2_CONFIG } from '../config';
 
 export type { CameraCalibration };
 
@@ -518,6 +526,12 @@ export class IPhO2024E2Engine {
   private readonly host: HTMLElement;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
+  private readonly clock = new THREE.Clock();
+  public readonly physics = new RigidBodySimulator();
+  public elevationMode: 'camera_plane' | 'horizontal' = 'camera_plane';
+  private readonly physicsBodies = new Map<string, { body: RigidBody; group: THREE.Group }>();
+  private pointerDownPos = { x: 0, y: 0 };
+  private hoveredId: InteractionId | null = null;
   private frame = 0;
   private state: IPhO2024E2State | null = null;
   private selected: THREE.Object3D | null = null;
@@ -530,9 +544,13 @@ export class IPhO2024E2Engine {
     startY: number;
     startValue: number;
     planeY?: number;
+    initialHitPoint?: THREE.Vector3;
+    grabOffset?: THREE.Vector3;
     grabOffsetX?: number;
+    grabOffsetY?: number;
     grabOffsetZ?: number;
     startPosX?: number;
+    startPosY?: number;
     startPosZ?: number;
     wasInsideKit?: boolean;
     moved: boolean;
@@ -655,8 +673,134 @@ export class IPhO2024E2Engine {
     this.screenPattern = this.addPatternPlane(this.pattern.texture);
 
     this.buildGhostMeshes();
+    this.initPhysics();
     this.bindEvents();
     this.animate();
+  }
+
+  private initPhysics(): void {
+    // 1. Platform (box)
+    const platDesc = assetRegistry.getDescriptor('optical_platform');
+    const platBody = new RigidBody({
+      id: 'platform',
+      collider: new OBBCollider(
+        new THREE.Vector3((platDesc?.collision.size[0] ?? 1.55) / 2, (platDesc?.collision.size[1] ?? 0.08) / 2, (platDesc?.collision.size[2] ?? 0.90) / 2),
+        new THREE.Vector3(...(platDesc?.collision.offset ?? [0, 0.04, 0]))
+      ),
+      position: new THREE.Vector3(0.05, 0, -0.08),
+      mass: 3.5,
+      restitution: 0.12,
+    });
+    this.physics.addBody(platBody);
+    this.physicsBodies.set('platform', { body: platBody, group: this.platformGroup });
+
+    // 2. Screen (box)
+    const scrDesc = assetRegistry.getDescriptor('observation_screen');
+    const scrBody = new RigidBody({
+      id: 'screen',
+      collider: new OBBCollider(
+        new THREE.Vector3((scrDesc?.collision.size[0] ?? 0.34) / 2, (scrDesc?.collision.size[1] ?? 0.70) / 2, (scrDesc?.collision.size[2] ?? 0.72) / 2),
+        new THREE.Vector3(...(scrDesc?.collision.offset ?? [0, 0.35, 0]))
+      ),
+      position: new THREE.Vector3(1.34, 0, 0),
+      mass: 1.8,
+      restitution: 0.15,
+    });
+    this.physics.addBody(scrBody);
+    this.physicsBodies.set('screen', { body: scrBody, group: this.screenGroup });
+
+    // 3. Electronics Controller (box)
+    const elDesc = assetRegistry.getDescriptor('electronic_controller');
+    const elBody = new RigidBody({
+      id: 'electronics',
+      collider: new OBBCollider(
+        new THREE.Vector3((elDesc?.collision.size[0] ?? 0.64) / 2, (elDesc?.collision.size[1] ?? 0.10) / 2, (elDesc?.collision.size[2] ?? 0.42) / 2),
+        new THREE.Vector3(...(elDesc?.collision.offset ?? [0, 0.05, 0]))
+      ),
+      position: new THREE.Vector3(-0.08, 0, 0.82),
+      mass: 0.65,
+      restitution: 0.15,
+    });
+    this.physics.addBody(elBody);
+    this.physicsBodies.set('electronics', { body: elBody, group: this.electronicsGroup });
+
+    // 4. Power Bank (box)
+    const pbDesc = assetRegistry.getDescriptor('power_bank');
+    const pbBody = new RigidBody({
+      id: 'powerBank',
+      collider: new OBBCollider(
+        new THREE.Vector3((pbDesc?.collision.size[0] ?? 0.46) / 2, (pbDesc?.collision.size[1] ?? 0.08) / 2, (pbDesc?.collision.size[2] ?? 0.25) / 2),
+        new THREE.Vector3(...(pbDesc?.collision.offset ?? [0, 0.04, 0]))
+      ),
+      position: new THREE.Vector3(0.55, 0, 0.82),
+      mass: 0.45,
+      restitution: 0.15,
+    });
+    this.physics.addBody(pbBody);
+    this.physicsBodies.set('powerBank', { body: pbBody, group: this.powerBankGroup });
+
+    // 5. Cuvette (box)
+    const cuvDesc = assetRegistry.getDescriptor('optical_cuvette');
+    const cuvBody = new RigidBody({
+      id: 'cuvette',
+      collider: new OBBCollider(
+        new THREE.Vector3((cuvDesc?.collision.size[0] ?? 0.22) / 2, (cuvDesc?.collision.size[1] ?? 0.26) / 2, (cuvDesc?.collision.size[2] ?? 0.22) / 2),
+        new THREE.Vector3(...(cuvDesc?.collision.offset ?? [0, 0.13, 0]))
+      ),
+      position: new THREE.Vector3(0.50, 0, 0.35),
+      mass: 0.15,
+      restitution: 0.10,
+    });
+    this.physics.addBody(cuvBody);
+    this.physicsBodies.set('cuvette', { body: cuvBody, group: this.cuvetteGroup });
+
+    // 6. Bottle (cylinder)
+    const botDesc = assetRegistry.getDescriptor('dropper_bottle');
+    const botBody = new RigidBody({
+      id: 'bottle',
+      collider: new CylinderCollider(
+        botDesc?.collision.radius ?? 0.065,
+        (botDesc?.collision.height ?? 0.32) / 2,
+        new THREE.Vector3(...(botDesc?.collision.offset ?? [0, 0.16, 0]))
+      ),
+      position: new THREE.Vector3(-1.05, 0, 0.82),
+      mass: 0.20,
+      restitution: 0.15,
+    });
+    this.physics.addBody(botBody);
+    this.physicsBodies.set('bottle', { body: botBody, group: this.bottleGroup });
+
+    // 7. S1 Holder (cylinder)
+    const s1Desc = assetRegistry.getDescriptor('holder_s1');
+    const s1Body = new RigidBody({
+      id: 's1',
+      collider: new CylinderCollider(
+        s1Desc?.collision.radius ?? 0.25,
+        (s1Desc?.collision.height ?? 0.58) / 2,
+        new THREE.Vector3(...(s1Desc?.collision.offset ?? [0, 0.29, 0]))
+      ),
+      position: new THREE.Vector3(0.90, 0, 0.35),
+      mass: 0.85,
+      restitution: 0.15,
+    });
+    this.physics.addBody(s1Body);
+    this.physicsBodies.set('s1', { body: s1Body, group: this.s1Group });
+
+    // 8. S2 Holder (cylinder)
+    const s2Desc = assetRegistry.getDescriptor('holder_s2');
+    const s2Body = new RigidBody({
+      id: 's2',
+      collider: new CylinderCollider(
+        s2Desc?.collision.radius ?? 0.25,
+        (s2Desc?.collision.height ?? 0.58) / 2,
+        new THREE.Vector3(...(s2Desc?.collision.offset ?? [0, 0.29, 0]))
+      ),
+      position: new THREE.Vector3(0.90, 0, 0.65),
+      mass: 0.85,
+      restitution: 0.15,
+    });
+    this.physics.addBody(s2Body);
+    this.physicsBodies.set('s2', { body: s2Body, group: this.s2Group });
   }
 
   private addKit(): void {
@@ -1564,9 +1708,9 @@ export class IPhO2024E2Engine {
       }
       this.platformGroup.visible = true;
     } else {
-      if (this.platformGroup.parent !== this.kitGroup) this.kitGroup.add(this.platformGroup);
-      this.platformGroup.scale.setScalar(0.78);
       if (!isDraggingPlatform) {
+        if (this.platformGroup.parent !== this.kitGroup) this.kitGroup.add(this.platformGroup);
+        this.platformGroup.scale.setScalar(1.0);
         this.platformGroup.position.set(0, 0.21, -0.05);
       }
       this.platformGroup.visible = state.kit.lidOpen;
@@ -1598,9 +1742,9 @@ export class IPhO2024E2Engine {
         this.stageSlideSocket.unmount(true);
       }
     } else {
-      if (this.s1Group.parent !== this.kitGroup) this.kitGroup.add(this.s1Group);
-      this.s1Group.scale.setScalar(0.85);
       if (!isDraggingS1) {
+        if (this.s1Group.parent !== this.kitGroup) this.kitGroup.add(this.s1Group);
+        this.s1Group.scale.setScalar(1.0);
         this.s1Group.position.set(-0.44, 0.21, 0.42);
         this.s1Group.rotation.set(0, 0, 0);
       }
@@ -1632,9 +1776,9 @@ export class IPhO2024E2Engine {
         this.stageSlideSocket.unmount(true);
       }
     } else {
-      if (this.s2Group.parent !== this.kitGroup) this.kitGroup.add(this.s2Group);
-      this.s2Group.scale.setScalar(0.85);
       if (!isDraggingS2) {
+        if (this.s2Group.parent !== this.kitGroup) this.kitGroup.add(this.s2Group);
+        this.s2Group.scale.setScalar(1.0);
         this.s2Group.position.set(-0.15, 0.21, 0.42);
         this.s2Group.rotation.set(0, 0, 0);
       }
@@ -1667,9 +1811,9 @@ export class IPhO2024E2Engine {
         this.stageCuvetteSocket.unmount(true);
       }
     } else {
-      if (this.cuvetteGroup.parent !== this.kitGroup) this.kitGroup.add(this.cuvetteGroup);
-      this.cuvetteGroup.scale.setScalar(0.85);
       if (!isDraggingCuvette) {
+        if (this.cuvetteGroup.parent !== this.kitGroup) this.kitGroup.add(this.cuvetteGroup);
+        this.cuvetteGroup.scale.setScalar(1.0);
         this.cuvetteGroup.position.set(0.14, 0.21, 0.42);
         this.cuvetteGroup.rotation.set(0, 0, 0);
       }
@@ -1693,9 +1837,9 @@ export class IPhO2024E2Engine {
       }
       this.bottleGroup.visible = true;
     } else {
-      if (this.bottleGroup.parent !== this.kitGroup) this.kitGroup.add(this.bottleGroup);
-      this.bottleGroup.scale.setScalar(0.75);
       if (!isDraggingBottle) {
+        if (this.bottleGroup.parent !== this.kitGroup) this.kitGroup.add(this.bottleGroup);
+        this.bottleGroup.scale.setScalar(1.0);
         this.bottleGroup.position.set(0.44, 0.21, 0.42);
       }
       this.bottleGroup.visible = state.kit.lidOpen;
@@ -1719,9 +1863,9 @@ export class IPhO2024E2Engine {
       }
       this.screenGroup.visible = true;
     } else {
-      if (this.screenGroup.parent !== this.kitGroup) this.kitGroup.add(this.screenGroup);
-      this.screenGroup.scale.setScalar(0.65);
       if (!isDraggingScreen) {
+        if (this.screenGroup.parent !== this.kitGroup) this.kitGroup.add(this.screenGroup);
+        this.screenGroup.scale.setScalar(1.0);
         this.screenGroup.position.set(0.38, 0.21, -0.42);
       }
       this.screenGroup.visible = state.kit.lidOpen;
@@ -1735,9 +1879,9 @@ export class IPhO2024E2Engine {
       }
       this.electronicsGroup.visible = true;
     } else {
-      if (this.electronicsGroup.parent !== this.kitGroup) this.kitGroup.add(this.electronicsGroup);
-      this.electronicsGroup.scale.setScalar(0.72);
       if (!isDraggingElectronics) {
+        if (this.electronicsGroup.parent !== this.kitGroup) this.kitGroup.add(this.electronicsGroup);
+        this.electronicsGroup.scale.setScalar(1.0);
         this.electronicsGroup.position.set(-0.38, 0.21, -0.42);
       }
       this.electronicsGroup.visible = state.kit.lidOpen;
@@ -1751,9 +1895,9 @@ export class IPhO2024E2Engine {
       }
       this.powerBankGroup.visible = true;
     } else {
-      if (this.powerBankGroup.parent !== this.kitGroup) this.kitGroup.add(this.powerBankGroup);
-      this.powerBankGroup.scale.setScalar(0.75);
       if (!isDraggingPowerBank) {
+        if (this.powerBankGroup.parent !== this.kitGroup) this.kitGroup.add(this.powerBankGroup);
+        this.powerBankGroup.scale.setScalar(1.0);
         this.powerBankGroup.position.set(0.0, 0.21, -0.42);
       }
       this.powerBankGroup.visible = state.kit.lidOpen;
@@ -1962,7 +2106,7 @@ export class IPhO2024E2Engine {
     return resolveFocusTarget(id, this.state?.kit.platformPlaced ?? false);
   }
 
-  private interactionFromEvent(event: PointerEvent): { id: InteractionId; object: THREE.Object3D } | null {
+  private interactionFromEvent(event: PointerEvent | MouseEvent | WheelEvent): { id: InteractionId; object: THREE.Object3D; point: THREE.Vector3 } | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
@@ -1971,7 +2115,7 @@ export class IPhO2024E2Engine {
       let object: THREE.Object3D | null = hit.object;
       while (object) {
         const id = object.userData.interactionId as InteractionId | undefined;
-        if (id) return { id, object };
+        if (id) return { id, object, point: hit.point.clone() };
         object = object.parent;
       }
     }
@@ -2010,6 +2154,8 @@ export class IPhO2024E2Engine {
 
     if (event.button !== 0) return;
 
+    this.pointerDownPos = { x: event.clientX, y: event.clientY };
+
     const hit = this.interactionFromEvent(event);
     if (!hit || !this.state) return;
     const { id } = hit;
@@ -2044,7 +2190,7 @@ export class IPhO2024E2Engine {
       movableGroups['cuvette'] = { group: this.cuvetteGroup, key: 'cuvette', planeY: 0, isInsideKit: isCuvetteInsideKit };
     }
 
-    // 2. Manipulação de Instrumentos com Tecla Alt Pressionada ou Arraste Direto de Itens Soltos/da Caixa
+    // 2. Manipulação de Instrumentos: Alt + LMB é o comando exclusivo para pegar e mover peças 3D
     const target = movableGroups[id];
     if (target) {
       if (target.isInsideKit && !this.state.kit.lidOpen) {
@@ -2055,9 +2201,8 @@ export class IPhO2024E2Engine {
           if (this.state.assemblyMode === 'realistic' && !this.state.kit.redOringsRemoved) return;
         }
 
-        const isLooseItem = id === 's1-holder' || id === 's2-holder' || id === 'cuvette' || id === 'pink-bottle';
-        // Permite arraste com Alt ou arraste direto para itens soltos/extração da caixa
-        if (event.altKey || target.isInsideKit || isLooseItem) {
+        // Alt + LMB exclusivo para movimentação e elevação 3D
+        if (event.altKey) {
           // Se o item estiver dentro do kitGroup, converte para coordenadas de mundo e repassa para a cena
           if (target.group.parent === this.kitGroup) {
             const worldPos = new THREE.Vector3();
@@ -2067,38 +2212,40 @@ export class IPhO2024E2Engine {
             target.group.scale.setScalar(1.0);
           }
 
-          const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -target.planeY);
-          const hitPoint = new THREE.Vector3();
-          if (this.raycaster.ray.intersectPlane(plane, hitPoint)) {
-            const grabOffsetX = target.group.position.x - hitPoint.x;
-            const grabOffsetZ = target.group.position.z - hitPoint.z;
+          const hitPoint = hit.point;
+          const grabOffset = target.group.position.clone().sub(hitPoint);
 
-            this.callbacks.onSelect(id);
-            this.drag = {
-              type: 'item',
-              id: target.key,
-              targetGroup: target.group,
-              startX: event.clientX,
-              startY: event.clientY,
-              startValue: 0,
-              planeY: target.planeY,
-              grabOffsetX,
-              grabOffsetZ,
-              startPosX: target.group.position.x,
-              startPosZ: target.group.position.z,
-              wasInsideKit: target.isInsideKit,
-              moved: false,
-            };
-            this.controls.isLocked = true;
-            this.renderer.domElement.style.cursor = 'grabbing';
-            this.renderer.domElement.setPointerCapture(event.pointerId);
-            return;
-          }
+          this.callbacks.onSelect(id);
+          this.drag = {
+            type: 'item',
+            id: target.key,
+            targetGroup: target.group,
+            startX: event.clientX,
+            startY: event.clientY,
+            startValue: 0,
+            planeY: hitPoint.y,
+            initialHitPoint: hitPoint.clone(),
+            grabOffset: grabOffset,
+            grabOffsetX: grabOffset.x,
+            grabOffsetY: grabOffset.y,
+            grabOffsetZ: grabOffset.z,
+            startPosX: target.group.position.x,
+            startPosY: target.group.position.y,
+            startPosZ: target.group.position.z,
+            wasInsideKit: target.isInsideKit,
+            moved: false,
+          };
+          this.physics.setBodyHeld(target.key, true);
+          this.physics.setBodyPosition(target.key, target.group.position);
+          this.controls.isLocked = true;
+          this.renderer.domElement.style.cursor = 'grabbing';
+          this.renderer.domElement.setPointerCapture(event.pointerId);
+          return;
         }
       }
     }
 
-    // 3. Ajuste de Knobs e Goniômetro
+    // 3. Ajuste de Knobs e Goniômetro (interações sem necessidade de Alt)
     if (id === 'rotation-knob' || id === 'protractor') {
       this.callbacks.onSelect(id);
       this.drag = { type: 'angle', startX: event.clientX, startY: event.clientY, startValue: this.state.apparatus.angleDeg, moved: false };
@@ -2120,7 +2267,7 @@ export class IPhO2024E2Engine {
   };
 
   private onPointerMove = (event: PointerEvent): void => {
-    // CRITICAL: Atualiza ponteiro e raycaster em cada movimento para desobstruir o arraste livre
+    // Atualiza ponteiro e raycaster em cada movimento para desobstruir o arraste livre
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
@@ -2131,73 +2278,91 @@ export class IPhO2024E2Engine {
       this.drag.moved ||= Math.abs(dx) + Math.abs(dy) > 3;
 
       if (this.drag.type === 'item' && this.drag.targetGroup) {
-        const planeY = this.drag.planeY ?? 0;
-        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
-        const currentHit = new THREE.Vector3();
-        if (this.raycaster.ray.intersectPlane(plane, currentHit)) {
-          let targetX = currentHit.x + (this.drag.grabOffsetX ?? 0);
-          let targetZ = currentHit.z + (this.drag.grabOffsetZ ?? 0);
+        let currentHit = new THREE.Vector3();
+        if (this.elevationMode === 'camera_plane') {
+          const normal = new THREE.Vector3();
+          this.camera.getWorldDirection(normal).negate();
+          const planePoint = this.drag.initialHitPoint ?? this.drag.targetGroup.position;
+          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, planePoint);
+          this.raycaster.ray.intersectPlane(plane, currentHit);
+        } else {
+          const planeY = this.drag.planeY ?? 0;
+          const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
+          this.raycaster.ray.intersectPlane(plane, currentHit);
+        }
 
-          // Segurar Shift junto com Alt ativa modo micrométrico (5x mais preciso)
-          if (event.shiftKey && this.drag.startPosX !== undefined && this.drag.startPosZ !== undefined) {
-            targetX = this.drag.startPosX + (targetX - this.drag.startPosX) * 0.2;
-            targetZ = this.drag.startPosZ + (targetZ - this.drag.startPosZ) * 0.2;
+        let targetX = currentHit.x + (this.drag.grabOffset?.x ?? this.drag.grabOffsetX ?? 0);
+        let targetY = currentHit.y + (this.drag.grabOffset?.y ?? this.drag.grabOffsetY ?? 0);
+        let targetZ = currentHit.z + (this.drag.grabOffset?.z ?? this.drag.grabOffsetZ ?? 0);
+
+        // Segurar Shift junto com Alt ativa modo micrométrico (5x mais preciso)
+        if (event.shiftKey && this.drag.startPosX !== undefined && this.drag.startPosZ !== undefined) {
+          targetX = this.drag.startPosX + (targetX - this.drag.startPosX) * 0.2;
+          targetZ = this.drag.startPosZ + (targetZ - this.drag.startPosZ) * 0.2;
+        }
+
+        const isFloorKit = this.drag.id === 'kit' && this.state?.kit.location === 'floor';
+        const clampedX = isFloorKit
+          ? Math.max(-2.9, Math.min(-1.5, targetX))
+          : Math.max(-2.85, Math.min(2.85, targetX));
+        const clampedZ = isFloorKit
+          ? Math.max(0.4, Math.min(1.4, targetZ))
+          : Math.max(-1.45, Math.min(1.45, targetZ));
+        const minY = isFloorKit ? -0.78 : 0;
+        const clampedY = Math.max(minY, Math.min(1.8, targetY));
+
+        this.drag.targetGroup.position.x = clampedX;
+        if (this.elevationMode === 'camera_plane') {
+          this.drag.targetGroup.position.y = clampedY;
+        }
+        this.drag.targetGroup.position.z = clampedZ;
+
+        if (this.drag.id) {
+          this.physics.setBodyPosition(this.drag.id, this.drag.targetGroup.position);
+        }
+
+        // Sincroniza feixe do laser, anteparo e cabos flexíveis em tempo real
+        if (this.drag.id === 'platform') {
+          this.updateLaserBeam();
+          this.updateCables();
+        } else if (this.drag.id === 'screen') {
+          this.screenPattern.position.x = clampedX + 0.031;
+          this.screenPattern.position.z = clampedZ;
+          if (this.state) {
+            const platX = this.platformGroup.position.x;
+            this.state.apparatus.screenDistance = Math.max(0.55, Math.min(1.15, clampedX - (platX + 0.50)));
           }
+          this.updateLaserBeam();
+        } else if (this.drag.id === 'electronics' || this.drag.id === 'powerBank') {
+          this.updateCables();
+        }
 
-          const isFloorKit = this.drag.id === 'kit' && this.state?.kit.location === 'floor';
-          const clampedX = isFloorKit
-            ? Math.max(-2.9, Math.min(-1.5, targetX))
-            : Math.max(-2.85, Math.min(2.85, targetX));
-          const clampedZ = isFloorKit
-            ? Math.max(0.4, Math.min(1.4, targetZ))
-            : Math.max(-1.45, Math.min(1.45, targetZ));
+        if (this.callbacks.onSetItemPosition && this.drag.id) {
+          this.callbacks.onSetItemPosition(this.drag.id, clampedX, clampedZ);
+        }
 
-          this.drag.targetGroup.position.x = clampedX;
-          this.drag.targetGroup.position.z = clampedZ;
+        // Orientação Ghost Mesh no modo Guided
+        const isMountable = this.drag.id === 's1' || this.drag.id === 's2' || this.drag.id === 'cuvette';
+        if (isMountable && this.state?.kit.platformPlaced) {
+          const stageWorldPos = new THREE.Vector3();
+          this.protractorGroup.getWorldPosition(stageWorldPos);
+          const dist = Math.hypot(clampedX - stageWorldPos.x, clampedZ - stageWorldPos.z);
+          const mode = this.state.assemblyMode ?? 'guided';
 
-          // Sincroniza feixe do laser, anteparo e cabos flexíveis em tempo real
-          if (this.drag.id === 'platform') {
-            this.updateLaserBeam();
-            this.updateCables();
-          } else if (this.drag.id === 'screen') {
-            this.screenPattern.position.x = clampedX + 0.031;
-            this.screenPattern.position.z = clampedZ;
-            if (this.state) {
-              const platX = this.platformGroup.position.x;
-              this.state.apparatus.screenDistance = Math.max(0.55, Math.min(1.15, clampedX - (platX + 0.50)));
-            }
-            this.updateLaserBeam();
-          } else if (this.drag.id === 'electronics' || this.drag.id === 'powerBank') {
-            this.updateCables();
-          }
-
-          if (this.callbacks.onSetItemPosition && this.drag.id) {
-            this.callbacks.onSetItemPosition(this.drag.id, clampedX, clampedZ);
-          }
-
-          // Orientação Ghost Mesh no modo Guided
-          const isMountable = this.drag.id === 's1' || this.drag.id === 's2' || this.drag.id === 'cuvette';
-          if (isMountable && this.state?.kit.platformPlaced) {
-            const stageWorldPos = new THREE.Vector3();
-            this.protractorGroup.getWorldPosition(stageWorldPos);
-            const dist = Math.hypot(clampedX - stageWorldPos.x, clampedZ - stageWorldPos.z);
-            const mode = this.state.assemblyMode ?? 'guided';
-
-            if (mode === 'guided') {
-              const snapRadius = 0.48;
-              if (dist <= snapRadius) {
-                this.ghostGroup.position.set(stageWorldPos.x, stageWorldPos.y, stageWorldPos.z);
-                this.ghostGroup.rotation.y = this.protractorGroup.rotation.y;
-                this.ghostS1Group.visible = this.drag.id === 's1';
-                this.ghostS2Group.visible = this.drag.id === 's2';
-                this.ghostCuvetteGroup.visible = this.drag.id === 'cuvette';
-                this.ghostGroup.visible = true;
-              } else {
-                this.ghostGroup.visible = false;
-              }
+          if (mode === 'guided') {
+            const snapRadius = 0.48;
+            if (dist <= snapRadius) {
+              this.ghostGroup.position.set(stageWorldPos.x, stageWorldPos.y, stageWorldPos.z);
+              this.ghostGroup.rotation.y = this.protractorGroup.rotation.y;
+              this.ghostS1Group.visible = this.drag.id === 's1';
+              this.ghostS2Group.visible = this.drag.id === 's2';
+              this.ghostCuvetteGroup.visible = this.drag.id === 'cuvette';
+              this.ghostGroup.visible = true;
             } else {
               this.ghostGroup.visible = false;
             }
+          } else {
+            this.ghostGroup.visible = false;
           }
         }
         return;
@@ -2228,6 +2393,7 @@ export class IPhO2024E2Engine {
 
     const hit = this.interactionFromEvent(event);
     const object = hit?.object ?? null;
+    this.hoveredId = hit?.id ?? null;
     if (object !== this.hovered) {
       this.setHighlight(this.hovered, false);
       this.hovered = object;
@@ -2260,6 +2426,15 @@ export class IPhO2024E2Engine {
       }
       this.renderer.domElement.style.cursor = 'default';
 
+      // Libera objeto para o motor de física cair sob gravidade
+      if (draggedId) {
+        this.physics.setBodyHeld(draggedId, false);
+        const body = this.physics.getBody(draggedId);
+        if (body) {
+          body.wake();
+        }
+      }
+
       if (hadMoved) {
         if (wasItemDrag && this.state && targetGroup && draggedId) {
           const kitX = this.kitGroup.position.x;
@@ -2284,6 +2459,7 @@ export class IPhO2024E2Engine {
           if (isOverKit && this.state.kit.lidOpen && extractItemName) {
             // Solto sobre o estojo aberto -> Armazenar na caixa
             this.callbacks.onStoreItem?.(extractItemName);
+            this.physics.setBodyHeld(draggedId, true);
             AudioManager.playSnap();
           } else if (extractItemName && wasInsideKit) {
             // Retirado da caixa para a bancada -> Extrair item
@@ -2308,6 +2484,8 @@ export class IPhO2024E2Engine {
 
               if (canSnap) {
                 AudioManager.playSnap();
+                this.physics.setBodyPosition(draggedId, stageWorldPos);
+                this.physics.setBodyHeld(draggedId, true);
                 if (draggedId === 's1') {
                   this.callbacks.onInstallS1?.();
                 } else if (draggedId === 's2') {
@@ -2327,6 +2505,15 @@ export class IPhO2024E2Engine {
         }
         return;
       }
+    }
+
+    // Deconflict LMB orbit from selection: se houve movimento do cursor > 4px, não abre card
+    const pointerDist = Math.hypot(
+      event.clientX - this.pointerDownPos.x,
+      event.clientY - this.pointerDownPos.y
+    );
+    if (pointerDist > 4.0) {
+      return;
     }
 
     const hit = this.interactionFromEvent(event);
@@ -2355,6 +2542,84 @@ export class IPhO2024E2Engine {
     }
   };
 
+  private onWheel = (event: WheelEvent): void => {
+    let targetId = this.hoveredId;
+    if (!targetId) {
+      const hit = this.interactionFromEvent(event);
+      targetId = hit?.id ?? null;
+    }
+
+    if (!targetId) return;
+
+    if (targetId === 'rotation-knob' || targetId === 'protractor') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const currentAngle = this.state?.apparatus.angleDeg ?? 0;
+      const step = event.deltaY < 0 ? 0.25 : -0.25;
+      const nextAngle = Math.max(0, Math.min(IPHO_2024_E2_CONFIG.maxAngleDeg, currentAngle + step));
+      this.callbacks.onSetAngle(nextAngle);
+      if (this.state) this.state.apparatus.angleDeg = nextAngle;
+      this.protractorGroup.rotation.y = (nextAngle * Math.PI) / 180;
+    } else if (targetId === 'current-knob') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const currentMa = this.state?.electronics?.laserCurrentMa ?? 15.0;
+      const step = event.deltaY < 0 ? 0.1 : -0.1;
+      const nextMa = Math.max(0, Math.min(25.0, Math.round((currentMa + step) * 10) / 10));
+      this.callbacks.onSetLaserCurrent?.(nextMa);
+      if (this.state) this.state.electronics.laserCurrentMa = nextMa;
+    } else if (targetId === 'laser-height-knob') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const currentH = this.state?.apparatus.laserHeight ?? 0.35;
+      const step = event.deltaY < 0 ? 0.005 : -0.005;
+      const nextH = Math.max(0.18, Math.min(0.82, currentH + step));
+      this.callbacks.onSetLaserHeight(nextH);
+      if (this.state) this.state.apparatus.laserHeight = nextH;
+      const laserCarriage = this.laserAssembly.getObjectByName('laser-carriage');
+      if (laserCarriage) laserCarriage.position.y = nextH;
+      this.updateLaserBeam();
+      this.updateCables();
+    } else if (targetId === 'lens-height-knob') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const currentH = this.state?.apparatus.lensHeight ?? 0.35;
+      const step = event.deltaY < 0 ? 0.005 : -0.005;
+      const nextH = Math.max(0.18, Math.min(0.82, currentH + step));
+      this.callbacks.onSetLensHeight(nextH);
+      if (this.state) this.state.apparatus.lensHeight = nextH;
+      const lensCarriage = this.lensAssembly.getObjectByName('lens-carriage');
+      if (lensCarriage) lensCarriage.position.y = nextH;
+    }
+  };
+
+  private onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Alt') {
+      event.preventDefault();
+    }
+  };
+
+  private onKeyUp = (event: KeyboardEvent): void => {
+    if (event.key === 'Alt') {
+      event.preventDefault();
+      if (this.drag?.type === 'item') {
+        const draggedId = this.drag.id;
+        this.controls.isLocked = false;
+        this.drag = null;
+        this.renderer.domElement.style.cursor = 'default';
+        if (draggedId) {
+          this.physics.setBodyHeld(draggedId, false);
+          const body = this.physics.getBody(draggedId);
+          if (body) body.wake();
+        }
+      }
+    }
+  };
+
   private setHighlight(object: THREE.Object3D | null, highlighted: boolean): void {
     object?.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
@@ -2379,6 +2644,9 @@ export class IPhO2024E2Engine {
     this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
     this.renderer.domElement.addEventListener('pointermove', this.onPointerMove);
     this.renderer.domElement.addEventListener('pointerup', this.onPointerUp);
+    this.renderer.domElement.addEventListener('wheel', this.onWheel, { passive: false, capture: true });
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('resize', this.onResize);
   }
 
@@ -2395,6 +2663,34 @@ export class IPhO2024E2Engine {
 
   private animate = (): void => {
     this.frame = requestAnimationFrame(this.animate);
+
+    const dt = Math.min(this.clock.getDelta(), 0.05);
+    this.physics.step(dt);
+
+    for (const [id, { body, group }] of this.physicsBodies.entries()) {
+      const isDraggingThis = this.drag?.type === 'item' && this.drag?.id === id;
+      if (isDraggingThis) {
+        body.position.copy(group.position);
+        body.wake();
+        continue;
+      }
+      if (!body.isHeld && group.parent === this.scene) {
+        group.position.x = body.position.x;
+        group.position.y = body.position.y;
+        group.position.z = body.position.z;
+        if (id === 'platform') {
+          this.updateLaserBeam();
+          this.updateCables();
+        } else if (id === 'screen') {
+          this.screenPattern.position.x = group.position.x + 0.031;
+          this.screenPattern.position.z = group.position.z;
+          this.updateLaserBeam();
+        } else if (id === 'electronics' || id === 'powerBank') {
+          this.updateCables();
+        }
+      }
+    }
+
     if (this.ghostGroup.visible) {
       const t = performance.now() * 0.005;
       const pulse = 0.38 + 0.18 * Math.sin(t);
@@ -2412,6 +2708,9 @@ export class IPhO2024E2Engine {
     this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
     this.renderer.domElement.removeEventListener('pointermove', this.onPointerMove);
     this.renderer.domElement.removeEventListener('pointerup', this.onPointerUp);
+    this.renderer.domElement.removeEventListener('wheel', this.onWheel, { capture: true } as any);
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('resize', this.onResize);
     this.controls.dispose();
     this.pattern.dispose();
@@ -2441,6 +2740,8 @@ export class IPhO2024E2Engine {
         item.dispose();
       });
     });
+    this.physics.reset();
+    this.physicsBodies.clear();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

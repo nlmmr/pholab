@@ -155,28 +155,6 @@ function createMatchers(actual, isNot = false) {
         );
       }
     },
-    toThrow: (expected) => {
-      let threw = false;
-      let caughtError = null;
-      try {
-        if (typeof actual === 'function') {
-          actual();
-        }
-      } catch (err) {
-        threw = true;
-        caughtError = err;
-      }
-      if (expected && threw) {
-        if (typeof expected === 'string') {
-          assert(caughtError.message.includes(expected), `Expected error message to contain "${expected}", got "${caughtError.message}"`);
-        } else if (expected instanceof RegExp) {
-          assert(expected.test(caughtError.message), `Expected error message to match ${expected}, got "${caughtError.message}"`);
-        }
-      }
-      if (isNot ? threw : !threw) {
-        assert.fail(`Expected function ${isNot ? 'not to throw' : 'to throw'}`);
-      }
-    },
   };
 }
 
@@ -209,57 +187,31 @@ const vitestPlugin = {
   },
 };
 
-async function runTests() {
-  const fs = require('fs');
-  const pholab2Dir = process.env.PHOLAB2_DIR || (fs.existsSync(path.join(__dirname, 'src')) ? __dirname : 'c:/Users/josef/Desktop/pholab/pholab-2.0');
-  const testFiles = [
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/physics.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/physics-rigidbody.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/state.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/calibration.test.ts'),
-    path.join(pholab2Dir, 'src/core/primitives/primitives.test.ts'),
-    path.join(pholab2Dir, 'src/core/assets/assets.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/interaction.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/e2e-tier1-features.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/e2e-tier2-boundaries.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/e2e-tier3-pairwise.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/e2e-tier4-scenarios.test.ts'),
-    path.join(pholab2Dir, 'src/experiments/ipho-2024-e2/challenger2-stress.test.ts'),
-  ];
-
+async function runAdversarialTests() {
+  const file = path.join(pholabDir, 'src/experiments/ipho-2024-e2/challenger2-stress.test.ts');
   console.log('='.repeat(70));
-  console.log('   PhOLab 2.0 Unified Physics & Systems Verification Runner');
+  console.log('   Challenger 2 Controls, Interlocks & Workload Empirical Stress Runner');
   console.log('='.repeat(70));
 
   const totalStart = Date.now();
+  const result = await esbuild.build({
+    entryPoints: [file],
+    bundle: true,
+    write: false,
+    platform: 'node',
+    format: 'cjs',
+    plugins: [vitestPlugin],
+  });
 
-  for (const file of testFiles) {
-    const filename = path.basename(file);
-    const relPath = path.relative(pholab2Dir, file).replace(/\\/g, '/');
-    console.log(`\n▶ Compiling & running: ${relPath}`);
-    const compileStart = Date.now();
-
-    const result = await esbuild.build({
-      entryPoints: [file],
-      bundle: true,
-      write: false,
-      platform: 'node',
-      format: 'cjs',
-      plugins: [vitestPlugin],
-    });
-
-    const compileTime = Date.now() - compileStart;
-    const code = result.outputFiles[0].text;
-    const fn = new Function(code);
-    fn();
-  }
+  const code = result.outputFiles[0].text;
+  const fn = new Function(code);
+  fn();
 
   const totalElapsedMs = Date.now() - totalStart;
 
   console.log('\n' + '='.repeat(70));
-  console.log('                     VERIFICATION SUMMARY');
+  console.log('             CHALLENGER 2 STRESS VERIFICATION SUMMARY');
   console.log('='.repeat(70));
-  console.log(`  Test Files:      ${testFiles.length} passed (${testFiles.length} total)`);
   console.log(`  Test Suites:     ${stats.suitesPassed} passed, ${stats.suitesFailed} failed, ${stats.suites} total`);
   console.log(`  Test Cases:      ${stats.testsPassed} passed, ${stats.testsFailed} failed, ${stats.tests} total`);
   console.log(`  Success Rate:    ${((stats.testsPassed / (stats.tests || 1)) * 100).toFixed(1)}%`);
@@ -267,14 +219,14 @@ async function runTests() {
   console.log('='.repeat(70));
 
   if (stats.testsFailed > 0 || process.exitCode === 1) {
-    console.error('\n❌ Tests FAILED! Please review the failures above.');
+    console.error('\n❌ Challenger 2 Stress Tests FAILED!');
     process.exit(1);
   } else {
-    console.log('\n✅ 100% of all physics, state, calibration & primitive tests PASSED!\n');
+    console.log('\n✅ 100% of Challenger 2 Adversarial Stress Tests PASSED!\n');
   }
 }
 
-runTests().catch((err) => {
+runAdversarialTests().catch((err) => {
   console.error('\nRunner encountered an unexpected error:');
   console.error(err);
   process.exit(1);

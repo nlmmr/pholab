@@ -13,7 +13,7 @@ export const IPHO_2024_E2_CONFIG = {
   hiddenSlideThicknessS2Mm: 1.061,  // Lâmina grossa S2 (1061 µm, Slope B = 275.7)
   hiddenLiquidIndexN: 1.332,        // Líquido rosa desconhecido (Slope B = 128.0)
   hiddenSlideThicknessMm: 0.1489,   // Compatibilidade reversa
-  maxAngleDeg: 70,
+  maxAngleDeg: 80,
   maxAnglePartBDeg: 20,
   minimumMeasurements: 25,
   officialProblemUrl: 'https://ipho.olimpicos.net/pdf/IPhO_2024_Q5.pdf',
